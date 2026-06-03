@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile Settings</title>
+    <link rel="stylesheet" href="../style.css">
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+    <nav class="top-navbar">
+        <button class="menu-btn" onclick="toggleMenu()">☰</button>
+        <div class="brand-title">Profile Settings</div>
+        <div class="user-tag" id="userDisplay">Profile...</div>
+    </nav>
+
+    <aside class="sidebar" id="sidebarMenu">
+        <ul class="sidebar-menu">
+            <li><a href="dashboard.html">📝 Today's Entry</a></li>
+            <li><a href="history.html">📊 View Past Logs</a></li>
+            <li><a href="messages.html">💬 Message Box</a></li>
+            <li class="active"><a href="settings.html">⚙️ Profile Settings</a></li>
+            <li><hr style="border:0; border-top:1px solid #eee; margin:10px 0;"></li>
+            <li><a href="#" onclick="logout()" style="color:var(--danger);">🚪 Log Out</a></li>
+        </ul>
+    </aside>
+
+    <main class="main-container">
+        <div class="card">
+            <h2 class="card-title">Update Your Information</h2>
+            <form id="settingsForm">
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" id="profileName" required placeholder="Enter full name">
+                </div>
+                <div style="display:flex; gap:15px; flex-wrap:wrap;">
+                    <div class="form-group" style="flex:1; min-width:150px;">
+                        <label>Gender</label>
+                        <select id="gender">
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1; min-width:150px;">
+                        <label>Date of Birth</label>
+                        <input type="date" id="dob">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Profile Picture URL Link</label>
+                    <input type="text" id="avatarUrl" placeholder="Paste image host url link if available">
+                </div>
+                <button type="submit" class="btn btn-accent">Save Profile</button>
+            </form>
+        </div>
+    </main>
+
+    <script>
+        const firebaseConfig = { apiKey: "YOUR_API_KEY_HERE", authDomain: "YOUR_PROJECT_ID.firebaseapp.com", projectId: "YOUR_PROJECT_ID", storageBucket: "YOUR_PROJECT_ID.appspot.com", messagingSenderId: "YOUR_SENDER_ID", appId: "YOUR_APP_ID" };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        auth.onAuthStateChanged(user => {
+            if (user) {
+                document.getElementById('userDisplay').innerText = user.displayName || user.email;
+                db.collection('student_profiles').doc(user.email).get().then(doc => {
+                    if (doc.exists) {
+                        const d = doc.data();
+                        document.getElementById('profileName').value = d.fullName || user.displayName || "";
+                        document.getElementById('gender').value = d.gender || "Male";
+                        document.getElementById('dob').value = d.dob || "";
+                        document.getElementById('avatarUrl').value = d.avatar || "";
+                    }
+                });
+            } else { window.location.href = "../index.html"; }
+        });
+
+        document.getElementById('settingsForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const user = auth.currentUser;
+            const name = document.getElementById('profileName').value.trim();
+            const gen = document.getElementById('gender').value;
+            const bday = document.getElementById('dob').value;
+            const img = document.getElementById('avatarUrl').value.trim();
+
+            user.updateProfile({ displayName: name }).then(() => {
+                return db.collection('student_profiles').doc(user.email).set({
+                    fullName: name, gender: gen, dob: bday, avatar: img, email: user.email
+                }, { merge: true });
+            }).then(() => alert("Profile records updated!")).catch(err => alert(err.message));
+        });
+
+        function toggleMenu() { document.getElementById('sidebarMenu').classList.toggle('open'); }
+        function logout() { auth.signOut().then(() => window.location.href = "../index.html"); }
+    </script>
+</body>
+</html>
