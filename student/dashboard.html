@@ -3,44 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Dashboard - New Entry</title>
+    <title>Dashboard - Today's Entry</title>
     <link rel="stylesheet" href="../style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
 </head>
 <body>
 
     <nav class="top-navbar">
-        <button class="menu-btn" onclick="toggleMenu()">☰</button>
-        <div class="brand-title">SIWES Daily Logbook</div>
-        <div class="user-tag" id="userDisplay">Loading Profile...</div>
+        <div class="brand-section">
+            <button class="menu-btn" onclick="toggleMenu()">☰</button>
+            <h1 class="brand-title">SIWES Logbook</h1>
+        </div>
+        <div class="user-badge" id="userDisplay">Profile...</div>
     </nav>
 
     <aside class="sidebar" id="sidebarMenu">
         <ul class="sidebar-menu">
-            <li class="active"><a href="dashboard.html">📝 Today's Entry</a></li>
-            <li><a href="history.html">📊 View Past Logs</a></li>
-            <li><a href="messages.html">💬 Message Box</a></li>
-            <li><a href="settings.html">⚙️ Profile Settings</a></li>
-            <li><hr style="border:0; border-top:1px solid #eee; margin:10px 0;"></li>
-            <li><a href="#" onclick="logout()" style="color:var(--danger);">🚪 Log Out</a></li>
+            <li class="sidebar-item active"><a href="dashboard.html">📝 Today's Entry</a></li>
+            <li class="sidebar-item"><a href="history.html">📊 View Past Logs</a></li>
+            <li class="sidebar-item"><a href="messages.html">💬 Message Box</a></li>
+            <li class="sidebar-item"><a href="settings.html">⚙️ Profile Settings</a></li>
+            <li><hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;"></li>
+            <li class="sidebar-item"><a href="#" onclick="logout()" style="color: var(--status-rejected);">🚪 Log Out</a></li>
         </ul>
     </aside>
 
-    <main class="main-container">
+    <main class="main-wrapper" id="contentArea">
         <div class="card">
-            <h2 class="card-title">Add Today's Entry</h2>
+            <h2 class="card-title">📝 Add Today's Log Entry</h2>
             <form id="logForm">
-                <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
                     <div class="form-group" style="flex: 1; min-width: 200px;">
                         <label>Select Date</label>
                         <input type="date" id="logDate" required>
                     </div>
                     <div class="form-group" style="flex: 1; min-width: 200px;">
-                        <label>Upload Photo Proof</label>
-                        <input type="file" id="photoUpload" accept="image/*" capture="environment" required>
+                        <label>Photo Proof URL Link</label>
+                        <input type="text" id="photoUrl" placeholder="Paste ImgBB link or postimage link here" required>
                     </div>
                 </div>
 
@@ -48,10 +50,10 @@
 
                 <div class="form-group">
                     <label>Description of Work Done Today</label>
-                    <textarea id="activity" rows="5" placeholder="Write details about your tasks, setups managed, or technical items handled today..." required></textarea>
+                    <textarea id="activity" rows="5" placeholder="Write full details about your tasks, setups managed, or code architectures handled today..." required></textarea>
                 </div>
                 
-                <button type="submit" class="btn btn-accent">Save Log Entry</button>
+                <button type="submit" class="btn btn-accent" style="width: auto; padding: 12px 30px;">Save Log Entry</button>
             </form>
         </div>
     </main>
@@ -67,12 +69,11 @@
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
-        const storage = firebase.storage();
         const auth = firebase.auth();
 
         auth.onAuthStateChanged(user => {
             if (user) {
-                document.getElementById('userDisplay').innerText = user.displayName || user.email;
+                document.getElementById('userDisplay').innerText = `👤 ${user.displayName || user.email}`;
             } else {
                 window.location.href = "../index.html";
             }
@@ -90,28 +91,21 @@
         document.getElementById('logForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const user = auth.currentUser;
-            const file = document.getElementById('photoUpload').files[0];
             const date = document.getElementById('logDate').value;
             const text = document.getElementById('activity').value.trim();
+            const photoLink = document.getElementById('photoUrl').value.trim();
             const lat = document.getElementById('lat').value;
             const lng = document.getElementById('lng').value;
 
             if(!lat || !lng) return alert("Please allow location tracking access to verify this log.");
 
             try {
-                let imgUrl = "";
-                if (file) {
-                    const ref = storage.ref(`siwes_proofs/${user.uid}/${Date.now()}_${file.name}`);
-                    await ref.put(file);
-                    imgUrl = await ref.getDownloadURL();
-                }
-
                 await db.collection('siwes_logs').add({
                     email: user.email,
                     studentName: user.displayName || "Student",
                     date: date,
                     activity: text,
-                    photoProof: imgUrl,
+                    photoProof: photoLink,
                     location: { lat: parseFloat(lat), lng: parseFloat(lng) },
                     status: "Pending",
                     timestamp: firebase.firestore.FieldValue.serverTimestamp()
@@ -122,7 +116,10 @@
             } catch (err) { alert(err.message); }
         });
 
-        function toggleMenu() { document.getElementById('sidebarMenu').classList.toggle('open'); }
+        function toggleMenu() {
+            document.getElementById('sidebarMenu').classList.toggle('open');
+            document.getElementById('contentArea').classList.toggle('shifted');
+        }
         function logout() { auth.signOut().then(() => window.location.href = "../index.html"); }
     </script>
 </body>

@@ -5,44 +5,46 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Message Center</title>
     <link rel="stylesheet" href="../style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
 </head>
 <body>
 
-    <nav class="top-navbar" style="background:#111827;">
-        <button class="menu-btn" onclick="toggleMenu()">☰</button>
-        <div class="brand-title">SIWES Message Center</div>
-        <div class="user-tag" style="background:#dc2626;">Supervisor Mode</div>
+    <nav class="top-navbar" style="background-color: var(--primary-slate);">
+        <div class="brand-section">
+            <button class="menu-btn" onclick="toggleMenu()">☰</button>
+            <h1 class="brand-title">SIWES Message Center</h1>
+        </div>
+        <div class="user-badge" style="border-color: var(--status-rejected); color: var(--status-rejected);">🛡️ EVALUATOR MODE</div>
     </nav>
 
     <aside class="sidebar" id="sidebarMenu">
         <ul class="sidebar-menu">
-            <li><a href="dashboard.html">📊 Review Pending Logs</a></li>
-            <li class="active"><a href="broadcast.html">📤 Message Center</a></li>
-            <li><a href="history.html">📜 Review History Book</a></li>
-            <li><hr style="border:0; border-top:1px solid #eee; margin:10px 0;"></li>
-            <li><a href="#" onclick="logout()" style="color:var(--danger);">🚪 Log Out</a></li>
+            <li class="sidebar-item"><a href="dashboard.html">📊 Review Pending Logs</a></li>
+            <li class="sidebar-item active"><a href="broadcast.html">📤 Message Center</a></li>
+            <li class="sidebar-item"><a href="history.html">📜 Review History Book</a></li>
+            <li><hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;"></li>
+            <li class="sidebar-item"><a href="#" onclick="logout()" style="color: var(--status-rejected);">🚪 Log Out</a></li>
         </ul>
     </aside>
 
-    <main class="main-container" style="max-width:1100px;">
-        <div style="display:flex; gap:20px; flex-wrap:wrap;">
+    <main class="main-wrapper" id="contentArea">
+        <div style="display:flex; gap:30px; flex-wrap:wrap;">
             
-            <div class="card" style="flex:1; min-width:300px;">
-                <h3 class="card-title">Incoming Student Messages</h3>
-                <div class="chat-box" id="studentMailStream"></div>
+            <div class="card" style="flex:1.2; min-width:320px;">
+                <h3 class="card-title">📥 Incoming Inquiries</h3>
+                <div class="chat-container" id="studentMailStream"></div>
             </div>
 
             <div class="card" style="flex:1; min-width:300px;">
-                <h3 class="card-title">Send a Message</h3>
+                <h3 class="card-title">📤 Send a Message</h3>
                 <div class="form-group">
                     <label>Audience Target</label>
                     <select id="scope" onchange="document.getElementById('targetBox').style.display = this.value==='ALL'?'none':'block'">
-                        <option value="ALL">Broadcast to All Registered Students</option>
-                        <option value="DIRECT">Send to Specific Student Only</option>
+                        <option value="ALL">📢 General Broadcast Notification (All Students)</option>
+                        <option value="DIRECT">🔒 Private Direct Note (Single Student)</option>
                     </select>
                 </div>
                 <div class="form-group" id="targetBox" style="display:none;">
@@ -51,9 +53,9 @@
                 </div>
                 <div class="form-group">
                     <label>Message Content</label>
-                    <textarea id="msgBody" rows="4" placeholder="Write announcement details or feedback here..."></textarea>
+                    <textarea id="msgBody" rows="4" placeholder="Write announcements, log update notices, or specific feedback here..."></textarea>
                 </div>
-                <button onclick="dispatch()" class="btn btn-primary" style="width:100%;">Send Message</button>
+                <button onclick="dispatch()" class="btn btn-primary" style="width:100%;">Deploy Message</button>
             </div>
 
         </div>
@@ -70,7 +72,6 @@
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
-        const storage = firebase.storage();
         const auth = firebase.auth();
 
         auth.onAuthStateChanged(user => {
@@ -90,7 +91,7 @@
                 text: text,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             }).then(() => {
-                alert("Message sent!");
+                alert("Message deployed successfully!");
                 document.getElementById('msgBody').value = "";
                 document.getElementById('targetEmail').value = "";
             });
@@ -102,10 +103,10 @@
                 snap.forEach(doc => {
                     const m = doc.data();
                     stream.innerHTML += `
-                        <div class="msg msg-outbound" style="width:100%;">
+                        <div class="message-bubble msg-student-sent" style="width:100%; animation: scaleUp 0.3s ease;">
                             <b>From: ${m.senderName}</b> (<small>${m.sender}</small>)
-                            <p style="margin:5px 0; background:#f3f4f6; padding:8px; border-radius:4px;">${m.text}</p>
-                            <button onclick="replyShortcut('${m.sender}')" style="background:var(--primary);color:white;border:none;padding:3px 6px;border-radius:3px;font-size:11px;cursor:pointer;">Reply</button>
+                            <p style="margin:8px 0; background:#f8fafc; padding:10px; border-radius:6px; border: 1px solid var(--border-color); color: #334155;">${m.text}</p>
+                            <button onclick="replyShortcut('${m.sender}')" class="btn btn-primary" style="padding: 4px 12px; font-size:11px; width:auto; border-radius: 4px;">Reply</button>
                         </div>`;
                 });
             });
@@ -117,7 +118,10 @@
             document.getElementById('targetEmail').value = email;
             document.getElementById('msgBody').focus();
         }
-        function toggleMenu() { document.getElementById('sidebarMenu').classList.toggle('open'); }
+        function toggleMenu() {
+            document.getElementById('sidebarMenu').classList.toggle('open');
+            document.getElementById('contentArea').classList.toggle('shifted');
+        }
         function logout() { auth.signOut().then(() => window.location.href = "../index.html"); }
     </script>
 </body>

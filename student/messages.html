@@ -5,37 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Message Box</title>
     <link rel="stylesheet" href="../style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
 </head>
 <body>
 
     <nav class="top-navbar">
-        <button class="menu-btn" onclick="toggleMenu()">☰</button>
-        <div class="brand-title">Supervisor Messages</div>
-        <div class="user-tag" id="userDisplay">Profile...</div>
+        <div class="brand-section">
+            <button class="menu-btn" onclick="toggleMenu()">☰</button>
+            <h1 class="brand-title">Supervisor Messages</h1>
+        </div>
+        <div class="user-badge" id="userDisplay">Profile...</div>
     </nav>
 
     <aside class="sidebar" id="sidebarMenu">
         <ul class="sidebar-menu">
-            <li><a href="dashboard.html">📝 Today's Entry</a></li>
-            <li><a href="history.html">📊 View Past Logs</a></li>
-            <li class="active"><a href="messages.html">💬 Message Box</a></li>
-            <li><a href="settings.html">⚙️ Profile Settings</a></li>
-            <li><hr style="border:0; border-top:1px solid #eee; margin:10px 0;"></li>
-            <li><a href="#" onclick="logout()" style="color:var(--danger);">🚪 Log Out</a></li>
+            <li class="sidebar-item"><a href="dashboard.html">📝 Today's Entry</a></li>
+            <li class="sidebar-item"><a href="history.html">📊 View Past Logs</a></li>
+            <li class="sidebar-item active"><a href="messages.html">💬 Message Box</a></li>
+            <li class="sidebar-item"><a href="settings.html">⚙️ Profile Settings</a></li>
+            <li><hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;"></li>
+            <li class="sidebar-item"><a href="#" onclick="logout()" style="color: var(--status-rejected);">🚪 Log Out</a></li>
         </ul>
     </aside>
 
-    <main class="main-container">
+    <main class="main-wrapper" id="contentArea">
         <div class="card">
-            <h2 class="card-title">Chat with Supervisor</h2>
-            <div class="chat-box" id="chatStream"></div>
-            <div style="display:flex; gap:10px;">
-                <input type="text" id="msgText" placeholder="Type a reply here...">
-                <button onclick="sendMessage()" class="btn btn-primary">Send</button>
+            <h2 class="card-title">💬 Chat with Supervisor</h2>
+            <div class="chat-container" id="chatStream"></div>
+            <div style="display:flex; gap:12px;">
+                <input type="text" id="msgText" placeholder="Type your reply here...">
+                <button onclick="sendMessage()" class="btn btn-primary" style="width: auto; padding: 0 24px;">Send</button>
             </div>
         </div>
     </main>
@@ -51,12 +53,11 @@
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
-        const storage = firebase.storage();
         const auth = firebase.auth();
 
         auth.onAuthStateChanged(user => {
             if (user) {
-                document.getElementById('userDisplay').innerText = user.displayName || user.email;
+                document.getElementById('userDisplay').innerText = `👤 ${user.displayName || user.email}`;
                 listen();
             } else { window.location.href = "../index.html"; }
         });
@@ -85,15 +86,18 @@
                   let html = "";
                   snap.forEach(doc => {
                       const msg = doc.data();
-                      const cls = msg.recipient === 'ALL' ? 'msg-inbound' : 'msg-direct';
-                      const lbl = msg.recipient === 'ALL' ? '📢 Broadcast Notice' : '🔒 Private Direct Message';
-                      html += `<div class="msg ${cls}"><small style="display:block;font-weight:bold;">${lbl}</small><p>${msg.text}</p></div>`;
+                      const cls = msg.recipient === 'ALL' ? 'msg-general' : 'msg-private';
+                      const lbl = msg.recipient === 'ALL' ? '📢 Broadcast Notice' : '🔒 Private Message';
+                      html += `<div class="message-bubble ${cls}"><small style="display:block; font-weight:700; color:var(--primary-slate); margin-bottom:4px;">${lbl}</small><p>${msg.text}</p></div>`;
                   });
                   box.innerHTML = html;
                   box.scrollTop = box.scrollHeight;
               });
         }
-        function toggleMenu() { document.getElementById('sidebarMenu').classList.toggle('open'); }
+        function toggleMenu() {
+            document.getElementById('sidebarMenu').classList.toggle('open');
+            document.getElementById('contentArea').classList.toggle('shifted');
+        }
         function logout() { auth.signOut().then(() => window.location.href = "../index.html"); }
     </script>
 </body>

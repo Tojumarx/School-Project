@@ -3,27 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SIWES Logbook - Portal Login</title>
+    <title>SIWES Portal - Sign In</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Web Font Integration -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 </head>
-<body style="padding-top: 0; display: flex; align-items: center; justify-content: center; background: #e5e7eb;">
+<body style="padding-top: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);">
 
-    <div class="card" style="width: 100%; max-width: 400px;">
-        <h2 style="text-align: center; margin-bottom: 5px; color: var(--primary);">SIWES Portal</h2>
-        <p style="text-align: center; color: #6b7280; font-size: 0.9rem; margin-bottom: 25px;">Sign in to manage your logbook records</p>
-        
+    <div class="card animated-fade-in" style="width: 100%; max-width: 420px; padding: 40px; border: none; box-shadow: var(--shadow-lg);">
+        <div style="text-align: center; margin-bottom: 30px;">
+            <div style="width: 60px; height: 60px; background: rgba(14, 165, 233, 0.1); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 16px; color: var(--accent-sky); font-size: 2rem;">💻</div>
+            <h2 style="color: var(--primary-slate); font-weight: 800; letter-spacing: -0.03em;">SIWES Portal</h2>
+            <p style="color: #64748b; font-size: 0.9rem; margin-top: 4px;">Sign in to manage your logbook records</p>
+        </div>
+
         <form id="loginForm">
             <div class="form-group">
                 <label>Email Address</label>
-                <input type="email" id="email" required placeholder="example@fupre.edu.ng">
+                <input type="email" id="email" required placeholder="e.g., student@fupre.edu.ng">
             </div>
             <div class="form-group">
                 <label>Password</label>
                 <input type="password" id="password" required placeholder="••••••••">
             </div>
-            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">Sign In</button>
+            <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Sign In to Dashboard</button>
         </form>
     </div>
 
@@ -37,7 +42,7 @@
             appId: "1:1035689630303:web:1417dff7221ee3499e99ea"
         };
         firebase.initializeApp(firebaseConfig);
-        
+
         document.getElementById('loginForm').addEventListener('submit', (e) => {
             e.preventDefault();
             const email = document.getElementById('email').value.trim();

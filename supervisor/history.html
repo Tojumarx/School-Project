@@ -5,32 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Review History Book</title>
     <link rel="stylesheet" href="../style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
 </head>
 <body>
 
-    <nav class="top-navbar" style="background:#111827;">
-        <button class="menu-btn" onclick="toggleMenu()">☰</button>
-        <div class="brand-title">SIWES History Book</div>
-        <div class="user-tag" style="background:#dc2626;">Supervisor Mode</div>
+    <nav class="top-navbar" style="background-color: var(--primary-slate);">
+        <div class="brand-section">
+            <button class="menu-btn" onclick="toggleMenu()">☰</button>
+            <h1 class="brand-title">SIWES History Book</h1>
+        </div>
+        <div class="user-badge" style="border-color: var(--status-rejected); color: var(--status-rejected);">🛡️ EVALUATOR MODE</div>
     </nav>
 
     <aside class="sidebar" id="sidebarMenu">
         <ul class="sidebar-menu">
-            <li><a href="dashboard.html">📊 Review Pending Logs</a></li>
-            <li><a href="broadcast.html">📤 Message Center</a></li>
-            <li class="active"><a href="history.html">📜 Review History Book</a></li>
-            <li><hr style="border:0; border-top:1px solid #eee; margin:10px 0;"></li>
-            <li><a href="#" onclick="logout()" style="color:var(--danger);">🚪 Log Out</a></li>
+            <li class="sidebar-item"><a href="dashboard.html">📊 Review Pending Logs</a></li>
+            <li class="sidebar-item"><a href="broadcast.html">📤 Message Center</a></li>
+            <li class="sidebar-item active"><a href="history.html">📜 Review History Book</a></li>
+            <li><hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;"></li>
+            <li class="sidebar-item"><a href="#" onclick="logout()" style="color: var(--status-rejected);">🚪 Log Out</a></li>
         </ul>
     </aside>
 
-    <main class="main-container">
+    <main class="main-wrapper" id="contentArea">
         <div class="card">
-            <h3 class="card-title">Filter Log Archives</h3>
+            <h3 class="card-title">📜 Filter Student Log Archives</h3>
             <div class="filter-row">
                 <div class="form-group" style="flex:2;">
                     <label>Filter by Student Email</label>
@@ -44,10 +46,10 @@
                     <label>To Date</label>
                     <input type="date" id="fEnd">
                 </div>
-                <button onclick="runArchiveSearch()" class="btn btn-primary" style="height:40px;">Search</button>
+                <button onclick="runArchiveSearch()" class="btn btn-primary" style="height:46px; width: auto; align-self: flex-end;">Search Archives</button>
             </div>
 
-            <div style="overflow-x: auto;">
+            <div class="table-container">
                 <table>
                     <thead>
                         <tr>
@@ -57,7 +59,9 @@
                             <th>Status</th>
                         </tr>
                     </thead>
-                    <tbody id="archiveTable"></tbody>
+                    <tbody id="archiveTable">
+                        <tr><td colspan="4" style="text-align:center; color:#64748b; padding:20px;">Execute a search using the parameters above.</td></tr>
+                    </tbody>
                 </table>
             </div>
         </div>
@@ -74,7 +78,6 @@
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
-        const storage = firebase.storage();
         const auth = firebase.auth();
 
         auth.onAuthStateChanged(user => {
@@ -99,22 +102,25 @@
 
             query.orderBy("timestamp", "desc").get().then(snap => {
                 const tbody = document.getElementById('archiveTable'); tbody.innerHTML = "";
-                if(snap.empty) { tbody.innerHTML = "<tr><td colspan='4' style='text-align:center;'>No matching records found.</td></tr>"; return; }
+                if(snap.empty) { tbody.innerHTML = "<tr><td colspan='4' style='text-align:center; padding: 20px;'>No matching records found.</td></tr>"; return; }
                 
                 snap.forEach(doc => {
                     const d = doc.data();
                     tbody.innerHTML += `
-                        <tr>
-                            <td data-label="Student"><b>${d.studentName}</b><br><small>${d.email}</small></td>
-                            <td data-label="Date">${d.date}</td>
+                        <tr style="animation: scaleUp 0.3s ease;">
+                            <td data-label="Student"><b>👤 ${d.studentName}</b><br><small style="color: #64748b;">${d.email}</small></td>
+                            <td data-label="Date" style="white-space:nowrap; font-weight:600;">${d.date}</td>
                             <td data-label="Work Done">${d.activity}</td>
-                            <td data-label="Status"><span class="badge badge-${d.status.toLowerCase()}">${d.status}</span></td>
+                            <td data-label="Status"><span class="status-badge status-${d.status}">${d.status}</span></td>
                         </tr>`;
                 });
             }).catch(err => alert("Make sure your Firestore indexes are built for this query pattern."));
         }
 
-        function toggleMenu() { document.getElementById('sidebarMenu').classList.toggle('open'); }
+        function toggleMenu() {
+            document.getElementById('sidebarMenu').classList.toggle('open');
+            document.getElementById('contentArea').classList.toggle('shifted');
+        }
         function logout() { auth.signOut().then(() => window.location.href = "../index.html"); }
     </script>
 </body>
