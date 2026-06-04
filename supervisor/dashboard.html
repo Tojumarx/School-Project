@@ -9,6 +9,73 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <style>
+        /* Supervisor Master Calendar Design */
+        .calendar-wrapper {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+        }
+        .calendar-header-row {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            text-align: center;
+            font-weight: 700;
+            color: #64748b;
+            font-size: 0.85rem;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 8px;
+            text-align: center;
+        }
+        .calendar-day {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: var(--primary-slate);
+            cursor: default;
+            position: relative;
+            transition: var(--transition-fast);
+        }
+        .calendar-day:hover {
+            background-color: #f1f5f9;
+        }
+        .day-empty {
+            cursor: none;
+            pointer-events: none;
+            opacity: 0;
+        }
+        .day-has-pending::after {
+            content: '';
+            position: absolute;
+            bottom: 4px;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: var(--status-pending);
+        }
+        .supervisor-dashboard-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 24px;
+        }
+        @media (max-width: 992px) {
+            .supervisor-dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
 <body>
 
@@ -32,62 +99,82 @@
 
     <main class="main-wrapper" id="contentArea">
         
-        <!-- Live Interactive Analytical Metrics Row -->
         <div class="metrics-grid">
             <div class="metric-card" style="border-left: 4px solid var(--accent-blue);">
                 <div class="metric-data">
-                    <h4>Total Active Students</h4>
-                    <p id="totalStudentsCount">0</p>
+                    <h4>Logs Submitted Yesterday</h4>
+                    <p id="yesterdayLogsCount">0</p>
                 </div>
-                <div class="metric-icon" style="background: rgba(37, 99, 235, 0.1); color: var(--accent-blue);">👥</div>
+                <div class="metric-icon" style="background: rgba(37, 99, 235, 0.1); color: var(--accent-blue);">👤</div>
             </div>
             <div class="metric-card" style="border-left: 4px solid var(--status-pending);">
                 <div class="metric-data">
-                    <h4>Pending Review Logs</h4>
-                    <p id="pendingLogsCount">0</p>
+                    <h4>Logs Submitted This Week</h4>
+                    <p id="weeklyLogsTotal">0</p>
                 </div>
                 <div class="metric-icon" style="background: rgba(245, 158, 11, 0.1); color: var(--status-pending);">⏳</div>
             </div>
             <div class="metric-card" style="border-left: 4px solid var(--status-approved);">
                 <div class="metric-data">
-                    <h4>Verified Logs</h4>
-                    <p id="verifiedLogsCount">0</p>
+                    <h4>Remaining Verification Queue</h4>
+                    <p id="pendingLogsCount">0</p>
                 </div>
                 <div class="metric-icon" style="background: rgba(16, 185, 129, 0.1); color: var(--status-approved);">✅</div>
             </div>
         </div>
 
-        <div class="card">
-            <h3 class="card-title">🆕 Register New Student Account</h3>
-            <form id="addStudentForm" style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;">
-                <div class="form-group" style="flex:1; min-width:180px; margin-bottom:0;">
-                    <label>Student Email</label>
-                    <input type="email" id="newEmail" required placeholder="name@fupre.edu.ng">
-                </div>
-                <div class="form-group" style="flex:1; min-width:150px; margin-bottom:0;">
-                    <label>Temporary Password</label>
-                    <input type="password" id="newPass" required placeholder="Min 6 chars">
-                </div>
-                <button type="submit" class="btn btn-accent" style="height:46px; width: auto;">Create Account</button>
-            </form>
-        </div>
+        <div class="supervisor-dashboard-grid">
 
-        <div class="card">
-            <h3 class="card-title">📊 Unreviewed Log Pipeline</h3>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Student</th>
-                            <th>Date</th>
-                            <th>Description of Work</th>
-                            <th>Verification Checkpoint</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="logTable"></tbody>
-                </table>
+            <div style="display: flex; flex-direction: column; gap: 24px;">
+                <div class="card" style="margin-bottom: 0;">
+                    <h3 class="card-title">🆕 Register New Student Account</h3>
+                    <form id="addStudentForm" style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;">
+                        <div class="form-group" style="flex:1; min-width:180px; margin-bottom:0;">
+                            <label>Student Email</label>
+                            <input type="email" id="newEmail" required placeholder="name@fupre.edu.ng">
+                        </div>
+                        <div class="form-group" style="flex:1; min-width:150px; margin-bottom:0;">
+                            <label>Temporary Password</label>
+                            <input type="password" id="newPass" required placeholder="Min 6 chars">
+                        </div>
+                        <button type="submit" class="btn btn-accent" style="height:46px; width: auto;">Create Account</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3 class="card-title">📊 Unreviewed Log Pipeline</h3>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Student</th>
+                                    <th>Date</th>
+                                    <th>Description of Work</th>
+                                    <th>Verification Checkpoint</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logTable"></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
+
+            <div class="calendar-wrapper" style="align-self: flex-start;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="font-weight: 800; color: var(--primary-slate);">📅 SIWES Pipeline Calendar</h3>
+                    <h4 id="calendarMonthLabel" style="color: var(--accent-blue); font-weight: 700;">June 2026</h4>
+                </div>
+                
+                <p style="color: #64748b; font-size: 0.85rem; font-weight: 500; margin-bottom: 15px;">Dots indicate dates containing student logs pending review.</p>
+
+                <div class="calendar-header-row">
+                    <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+                </div>
+                
+                <div class="calendar-grid" id="calendarDaysGrid"></div>
+            </div>
+
         </div>
     </main>
 
@@ -103,6 +190,8 @@
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
         const auth = firebase.auth();
+
+        let pendingDatesSet = new Set(); // Stores Date strings 'YYYY-MM-DD' with pending reviews
 
         auth.onAuthStateChanged(user => {
             if (!user || (!user.email.toLowerCase().includes('admin') && !user.email.toLowerCase().includes('supervisor'))) {
@@ -128,25 +217,58 @@
         });
 
         function fetchMetrics() {
-            // Real-time counter metrics queries
-            db.collection('student_profiles').get().then(snap => {
-                document.getElementById('totalStudentsCount').innerText = snap.size;
-            });
+            const today = new Date();
+            const yesterdayStr = getFormattedOffsetDate(-1);
+
+            const startOfWeek = new Date();
+            startOfWeek.setDate(today.getDate() - today.getDay());
+            startOfWeek.setHours(0,0,0,0);
+
+            // Total outstanding unverified entries
             db.collection('siwes_logs').where("status", "==", "Pending").get().then(snap => {
                 document.getElementById('pendingLogsCount').innerText = snap.size;
             });
-            db.collection('siwes_logs').where("status", "==", "Approved").get().then(snap => {
-                document.getElementById('verifiedLogsCount').innerText = snap.size;
+
+            // Count logs sent yesterday and during the current week
+            db.collection('siwes_logs').get().then(snap => {
+                let yesterdayCount = 0;
+                let weeklyTotal = 0;
+
+                snap.forEach(doc => {
+                    const d = doc.data();
+                    if (d.date === yesterdayStr) {
+                        yesterdayCount++;
+                    }
+                    if (d.timestamp) {
+                        const tDate = d.timestamp.toDate();
+                        if (tDate >= startOfWeek) {
+                            weeklyTotal++;
+                        }
+                    }
+                });
+
+                document.getElementById('yesterdayLogsCount').innerText = yesterdayCount;
+                document.getElementById('weeklyLogsTotal').innerText = weeklyTotal;
             });
         }
 
         function listenLogs() {
             db.collection('siwes_logs').where("status", "==", "Pending").orderBy("timestamp", "desc").onSnapshot(snap => {
                 const tbody = document.getElementById('logTable'); tbody.innerHTML = "";
-                if(snap.empty) { tbody.innerHTML = "<tr><td colspan='5' style='text-align:center;color:#64748b; padding: 30px;'>No logs currently waiting evaluation.</td></tr>"; return; }
+                pendingDatesSet.clear();
+
+                if(snap.empty) { 
+                    tbody.innerHTML = "<tr><td colspan='5' style='text-align:center;color:#64748b; padding: 30px;'>No logs currently waiting evaluation.</td></tr>"; 
+                    renderSupervisorCalendar();
+                    return; 
+                }
                 
                 snap.forEach(doc => {
                     const d = doc.data();
+                    if (d.date) {
+                        pendingDatesSet.add(d.date);
+                    }
+
                     tbody.innerHTML += `
                         <tr style="animation: scaleUp 0.3s ease;">
                             <td data-label="Student"><b>👤 ${d.studentName}</b><br><small style="color: #64748b;">${d.email}</small></td>
@@ -162,7 +284,42 @@
                             </td>
                         </tr>`;
                 });
+
+                renderSupervisorCalendar();
             });
+        }
+
+        function renderSupervisorCalendar() {
+            const grid = document.getElementById('calendarDaysGrid');
+            grid.innerHTML = "";
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = today.getMonth();
+
+            const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+            document.getElementById('calendarMonthLabel').innerText = `${monthNames[month]} ${year}`;
+
+            const firstDayIndex = new Date(year, month, 1).getDay();
+            const totalDays = new Date(year, month + 1, 0).getDate();
+
+            // Offset calendar grid start days spacing padding
+            for (let i = 0; i < firstDayIndex; i++) {
+                grid.innerHTML += `<div class="calendar-day day-empty"></div>`;
+            }
+
+            // Fill numerical monthly layout blocks
+            for (let day = 1; day <= totalDays; day++) {
+                const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                let pendingClass = pendingDatesSet.has(dayStr) ? "day-has-pending" : "";
+
+                grid.innerHTML += `<div class="calendar-day ${pendingClass}" title="${pendingDatesSet.has(dayStr) ? 'Contains pending submissions' : 'No pipeline logs for today'}">${day}</div>`;
+            }
+        }
+
+        function getFormattedOffsetDate(offset) {
+            const d = new Date();
+            d.setDate(d.getDate() + offset);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         }
 
         function approve(id) { 
