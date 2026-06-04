@@ -23,6 +23,7 @@
     <aside class="sidebar" id="sidebarMenu">
         <ul class="sidebar-menu">
             <li class="sidebar-item"><a href="dashboard.html">📊 Review Pending Logs</a></li>
+            <li class="sidebar-item"><a href="students.html">👥 Supervised Students</a></li>
             <li class="sidebar-item"><a href="broadcast.html">📤 Message Center</a></li>
             <li class="sidebar-item active"><a href="history.html">📜 Review History Book</a></li>
             <li><hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;"></li>
@@ -35,8 +36,8 @@
             <h3 class="card-title">📜 Filter Student Log Archives</h3>
             <div class="filter-row">
                 <div class="form-group" style="flex:2;">
-                    <label>Filter by Student Email</label>
-                    <input type="email" id="fEmail" placeholder="student@fupre.edu.ng">
+                    <label>Filter by Student Name or Email</label>
+                    <input type="text" id="fSearchTerm" placeholder="Search student name or email...">
                 </div>
                 <div class="form-group">
                     <label>From Date</label>
@@ -85,13 +86,11 @@
         });
 
         function runArchiveSearch() {
-            const email = document.getElementById('fEmail').value.trim();
+            const term = document.getElementById('fSearchTerm').value.toLowerCase().trim();
             const start = document.getElementById('fStart').value;
             const end = document.getElementById('fEnd').value;
 
             let query = db.collection('siwes_logs');
-
-            if(email) query = query.where("email", "==", email);
             
             if(start && end) {
                 const sTS = firebase.firestore.Timestamp.fromDate(new Date(start));
@@ -104,17 +103,33 @@
                 const tbody = document.getElementById('archiveTable'); tbody.innerHTML = "";
                 if(snap.empty) { tbody.innerHTML = "<tr><td colspan='4' style='text-align:center; padding: 20px;'>No matching records found.</td></tr>"; return; }
                 
+                let matchesCount = 0;
                 snap.forEach(doc => {
                     const d = doc.data();
-                    tbody.innerHTML += `
-                        <tr style="animation: scaleUp 0.3s ease;">
-                            <td data-label="Student"><b>👤 ${d.studentName}</b><br><small style="color: #64748b;">${d.email}</small></td>
-                            <td data-label="Date" style="white-space:nowrap; font-weight:600;">${d.date}</td>
-                            <td data-label="Work Done">${d.activity}</td>
-                            <td data-label="Status"><span class="status-badge status-${d.status}">${d.status}</span></td>
-                        </tr>`;
+                    
+                    // Match query concurrently against studentName and email keys
+                    const nameMatch = d.studentName ? d.studentName.toLowerCase().includes(term) : false;
+                    const emailMatch = d.email ? d.email.toLowerCase().includes(term) : false;
+                    
+                    if (term === "" || nameMatch || emailMatch) {
+                        matchesCount++;
+                        tbody.innerHTML += `
+                            <tr style="animation: scaleUp 0.3s ease;">
+                                <td data-label="Student"><b>👤 ${d.studentName}</b><br><small style="color: #64748b;">${d.email}</small></td>
+                                <td data-label="Date" style="white-space:nowrap; font-weight:600;">${d.date}</td>
+                                <td data-label="Work Done">${d.activity}</td>
+                                <td data-label="Status"><span class="status-badge status-${d.status}">${d.status}</span></td>
+                            </tr>`;
+                    }
                 });
-            }).catch(err => alert("Make sure your Firestore indexes are built for this query pattern."));
+
+                if (matchesCount === 0) {
+                    tbody.innerHTML = "<tr><td colspan='4' style='text-align:center; padding: 20px;'>No matching records found.</td></tr>";
+                }
+            }).catch(err => {
+                alert("Make sure your Firestore indexes are built for this query pattern.");
+                console.error(err);
+            });
         }
 
         function toggleMenu() {

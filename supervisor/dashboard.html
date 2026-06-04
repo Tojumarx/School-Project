@@ -90,6 +90,7 @@
     <aside class="sidebar" id="sidebarMenu">
         <ul class="sidebar-menu">
             <li class="sidebar-item active"><a href="dashboard.html">📊 Review Pending Logs</a></li>
+            <li class="sidebar-item"><a href="students.html">👥 Supervised Students</a></li>
             <li class="sidebar-item"><a href="broadcast.html">📤 Message Center</a></li>
             <li class="sidebar-item"><a href="history.html">📜 Review History Book</a></li>
             <li><hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;"></li>
@@ -127,22 +128,14 @@
 
             <div style="display: flex; flex-direction: column; gap: 24px;">
                 <div class="card" style="margin-bottom: 0;">
-                    <h3 class="card-title">🆕 Register New Student Account</h3>
-                    <form id="addStudentForm" style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;">
-                        <div class="form-group" style="flex:1; min-width:180px; margin-bottom:0;">
-                            <label>Student Email</label>
-                            <input type="email" id="newEmail" required placeholder="name@fupre.edu.ng">
-                        </div>
-                        <div class="form-group" style="flex:1; min-width:150px; margin-bottom:0;">
-                            <label>Temporary Password</label>
-                            <input type="password" id="newPass" required placeholder="Min 6 chars">
-                        </div>
-                        <button type="submit" class="btn btn-accent" style="height:46px; width: auto;">Create Account</button>
-                    </form>
-                </div>
-
-                <div class="card">
                     <h3 class="card-title">📊 Unreviewed Log Pipeline</h3>
+                    
+                    <div class="filter-row" style="padding: 12px; margin-bottom: 16px;">
+                        <div class="form-group" style="width: 100%; margin-bottom: 0;">
+                            <input type="text" id="logSearch" onkeyup="filterLogsTable()" placeholder="Filter queue by student name or email...">
+                        </div>
+                    </div>
+
                     <div class="table-container">
                         <table>
                             <thead>
@@ -202,20 +195,6 @@
             }
         });
 
-        document.getElementById('addStudentForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('newEmail').value.trim();
-            const pass = document.getElementById('newPass').value;
-
-            let secondaryApp = firebase.initializeApp(firebaseConfig, "SecondaryInstance");
-            secondaryApp.auth().createUserWithEmailAndPassword(email, pass).then((res) => {
-                alert(`Account successfully created for ${email}!`);
-                document.getElementById('addStudentForm').reset();
-                secondaryApp.delete();
-                fetchMetrics();
-            }).catch(err => alert("Error provisioning profile: " + err.message));
-        });
-
         function fetchMetrics() {
             const today = new Date();
             const yesterdayStr = getFormattedOffsetDate(-1);
@@ -270,8 +249,8 @@
                     }
 
                     tbody.innerHTML += `
-                        <tr style="animation: scaleUp 0.3s ease;">
-                            <td data-label="Student"><b>👤 ${d.studentName}</b><br><small style="color: #64748b;">${d.email}</small></td>
+                        <tr class="log-pipeline-row" style="animation: scaleUp 0.3s ease;">
+                            <td data-label="Student" class="log-student-info"><b>👤 ${d.studentName}</b><br><small style="color: #64748b;">${d.email}</small></td>
                             <td data-label="Date" style="white-space:nowrap; font-weight: 600;">${d.date}</td>
                             <td data-label="Description of Work">${d.activity}</td>
                             <td data-label="Verification Checkpoint">
@@ -289,6 +268,20 @@
             });
         }
 
+        function filterLogsTable() {
+            const val = document.getElementById('logSearch').value.toLowerCase();
+            const rows = document.querySelectorAll('.log-pipeline-row');
+
+            rows.forEach(row => {
+                const info = row.querySelector('.log-student-info').innerText.toLowerCase();
+                if (info.includes(val)) {
+                    row.style.display = "";
+                } else {
+                    row.style.display = "none";
+                }
+            });
+        }
+
         function renderSupervisorCalendar() {
             const grid = document.getElementById('calendarDaysGrid');
             grid.innerHTML = "";
@@ -302,12 +295,10 @@
             const firstDayIndex = new Date(year, month, 1).getDay();
             const totalDays = new Date(year, month + 1, 0).getDate();
 
-            // Offset calendar grid start days spacing padding
             for (let i = 0; i < firstDayIndex; i++) {
                 grid.innerHTML += `<div class="calendar-day day-empty"></div>`;
             }
 
-            // Fill numerical monthly layout blocks
             for (let day = 1; day <= totalDays; day++) {
                 const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                 let pendingClass = pendingDatesSet.has(dayStr) ? "day-has-pending" : "";

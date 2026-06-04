@@ -9,6 +9,37 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <style>
+        /* Autocomplete dropdown list design */
+        .autocomplete-container {
+            position: relative;
+            width: 100%;
+        }
+        .autocomplete-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            width: 100%;
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            z-index: 1001;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+        .autocomplete-item {
+            padding: 10px 16px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            border-bottom: 1px solid #f1f5f9;
+            transition: background 0.2s;
+        }
+        .autocomplete-item:hover {
+            background-color: #f1f5f9;
+        }
+    </style>
 </head>
 <body>
 
@@ -23,6 +54,7 @@
     <aside class="sidebar" id="sidebarMenu">
         <ul class="sidebar-menu">
             <li class="sidebar-item"><a href="dashboard.html">📊 Review Pending Logs</a></li>
+            <li class="sidebar-item"><a href="students.html">👥 Supervised Students</a></li>
             <li class="sidebar-item active"><a href="broadcast.html">📤 Message Center</a></li>
             <li class="sidebar-item"><a href="history.html">📜 Review History Book</a></li>
             <li><hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;"></li>
@@ -42,15 +74,20 @@
                 <h3 class="card-title">📤 Send a Message</h3>
                 <div class="form-group">
                     <label>Audience Target</label>
-                    <select id="scope" onchange="document.getElementById('targetBox').style.display = this.value==='ALL'?'none':'block'">
+                    <select id="scope" onchange="toggleScope(this.value)">
                         <option value="ALL">📢 General Broadcast Notification (All Students)</option>
                         <option value="DIRECT">🔒 Private Direct Note (Single Student)</option>
                     </select>
                 </div>
-                <div class="form-group" id="targetBox" style="display:none;">
-                    <label>Target Student Email</label>
-                    <input type="email" id="targetEmail" placeholder="student@fupre.edu.ng">
+                
+                <div class="form-group" id="targetBox" style="display:none; position: relative;">
+                    <label>Target Student Name or Email</label>
+                    <div class="autocomplete-container">
+                        <input type="text" id="targetEmail" onkeyup="handleAutocomplete(this.value)" autocomplete="off" placeholder="Type student name or email...">
+                        <div id="autocompleteList" class="autocomplete-dropdown"></div>
+                    </div>
                 </div>
+
                 <div class="form-group">
                     <label>Message Content</label>
                     <textarea id="msgBody" rows="4" placeholder="Write announcements, log update notices, or specific feedback here..."></textarea>
@@ -74,8 +111,76 @@
         const db = firebase.firestore();
         const auth = firebase.auth();
 
+        let allStudents = []; // Cache array holding all student profiles locally
+
         auth.onAuthStateChanged(user => {
-            if(user) { listenMail(); } else { window.location.href="../index.html"; }
+            if(user) { 
+                listenMail(); 
+                fetchStudentCache();
+            } else { 
+                window.location.href="../index.html"; 
+            }
+        });
+
+        function fetchStudentCache() {
+            db.collection('student_profiles').get().then(snap => {
+                allStudents = [];
+                snap.forEach(doc => {
+                    const data = doc.data();
+                    allStudents.push({
+                        fullName: data.fullName || '',
+                        email: data.email || ''
+                    });
+                });
+            });
+        }
+
+        function handleAutocomplete(val) {
+            const list = document.getElementById('autocompleteList');
+            list.innerHTML = "";
+            const searchVal = val.toLowerCase().trim();
+
+            if (!searchVal) {
+                list.style.display = "none";
+                return;
+            }
+
+            // Locally filter matching entries
+            const matches = allStudents.filter(s => 
+                s.fullName.toLowerCase().includes(searchVal) || 
+                s.email.toLowerCase().includes(searchVal)
+            );
+
+            if (matches.length === 0) {
+                list.style.display = "none";
+                return;
+            }
+
+            matches.forEach(student => {
+                const item = document.createElement('div');
+                item.className = "autocomplete-item";
+                item.innerHTML = `<b>👤 ${student.fullName}</b><br><small style="color:#64748b;">${student.email}</small>`;
+                item.onclick = () => {
+                    document.getElementById('targetEmail').value = student.email;
+                    list.style.display = "none";
+                };
+                list.appendChild(item);
+            });
+
+            list.style.display = "block";
+        }
+
+        function toggleScope(val) {
+            const box = document.getElementById('targetBox');
+            box.style.display = (val === 'ALL') ? 'none' : 'block';
+            document.getElementById('autocompleteList').style.display = "none";
+        }
+
+        // Close dropdown when clicking elsewhere
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.autocomplete-container')) {
+                document.getElementById('autocompleteList').style.display = "none";
+            }
         });
 
         function dispatch() {
