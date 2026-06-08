@@ -479,3 +479,24 @@ tbody tr:hover {
         color: var(--primary-light);
     }
 }
+
+@media (max-width: 400px) {
+    .brand-title {
+        font-size: auto;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+        background: linear-gradient(135deg, #ffffff 0%, var(--accent-sky) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .user-badge {
+        font-size: auto;
+        padding: 4px 10px;
+        font-weight: 600;
+        background: rgba(255, 255, 255, 0.08);
+        padding: 6px 14px;
+        border-radius: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        transition: var(--transition-fast);
+    }
+}
