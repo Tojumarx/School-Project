@@ -1,0 +1,22 @@
+/* Supervisor History Page — archive search filter bar */
+.archive-filter-bar {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    background: #f8fafc;
+    padding: 20px;
+    border-radius: var(--radius-md);
+    margin-bottom: 25px;
+    align-items: flex-end;
+    border: 1px solid var(--border-color);
+}
+
+.archive-filter-bar .form-group {
+    margin-bottom: 0;
+    flex: 1;
+    min-width: 180px;
+}
+
+.archive-filter-search {
+    flex: 2;
+}
