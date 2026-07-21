@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, auth } from '../../firebase';
-import firebase from 'firebase/compat/app';
+import { BACKEND_URL } from '../../supabaseClient';
 import './Broadcast.css';
 
 interface Message {
@@ -9,7 +8,7 @@ interface Message {
     senderName: string;
     recipient: string;
     text: string;
-    timestamp?: any;
+    created_at?: string;
 }
 
 interface StudentCache {
@@ -33,46 +32,7 @@ export const SupervisorBroadcast: React.FC = () => {
     const autocompleteRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        const unsubscribeAuth = auth.onAuthStateChanged(user => {
-            if (user) {
-                // Fetch student cache for autocomplete
-                db.collection('student_profiles').get().then(snap => {
-                    const list: StudentCache[] = [];
-                    snap.forEach(doc => {
-                        const d = doc.data();
-                        list.push({
-                            fullName: d.fullName || '',
-                            email: d.email || ''
-                        });
-                    });
-                    setStudentsCache(list);
-                });
-
-                // Listen to incoming messages destined for evaluator
-                const unsubMail = db.collection('siwes_messages')
-                    .where('recipient', '==', 'SUPERVISOR')
-                    .orderBy('timestamp', 'desc')
-                    .onSnapshot(snap => {
-                        const list: Message[] = [];
-                        snap.forEach(doc => {
-                            const m = doc.data();
-                            list.push({
-                                id: doc.id,
-                                sender: m.sender || '',
-                                senderName: m.senderName || '',
-                                recipient: m.recipient || '',
-                                text: m.text || '',
-                                timestamp: m.timestamp
-                            });
-                        });
-                        setIncomingMsgs(list);
-                    });
-
-                return () => {
-                    unsubMail();
-                };
-            }
-        });
+        fetchStudentsAndMessages();
 
         // Close autocomplete when clicking outside
         const handleOutsideClick = (e: MouseEvent) => {
@@ -83,10 +43,38 @@ export const SupervisorBroadcast: React.FC = () => {
         document.addEventListener('click', handleOutsideClick);
 
         return () => {
-            unsubscribeAuth();
             document.removeEventListener('click', handleOutsideClick);
         };
     }, []);
+
+    const fetchStudentsAndMessages = async () => {
+        try {
+            // Fetch students list
+            const studentsRes = await fetch(`${BACKEND_URL}/api/students`);
+            const students = await studentsRes.json();
+            setStudentsCache(students.map((s: any) => ({
+                fullName: s.full_name || s.email,
+                email: s.email
+            })));
+
+            // Fetch messages
+            const msgRes = await fetch(`${BACKEND_URL}/api/messages`);
+            const allMsgs = await msgRes.json();
+            const incoming = allMsgs
+                .filter((m: any) => m.receiver_email === 'SUPERVISOR')
+                .map((m: any) => ({
+                    id: m.id,
+                    sender: m.sender_email || '',
+                    senderName: m.sender_name || m.sender_email || '',
+                    recipient: m.receiver_email || '',
+                    text: m.content || '',
+                    created_at: m.created_at
+                }));
+            setIncomingMsgs(incoming);
+        } catch (err) {
+            console.error("Failed to load broadcast data: ", err);
+        }
+    };
 
     const handleAutocompleteChange = (val: string) => {
         setTargetEmail(val);
@@ -115,7 +103,6 @@ export const SupervisorBroadcast: React.FC = () => {
         setScope('DIRECT');
         setTargetEmail(email);
         setShowAutocomplete(false);
-        // Scroll to message form or focus it
         const textarea = document.getElementById('msgBodyTextarea');
         if (textarea) {
             textarea.focus();
@@ -131,17 +118,20 @@ export const SupervisorBroadcast: React.FC = () => {
 
         setDispatching(true);
         try {
-            await db.collection('siwes_messages').add({
-                sender: "SUPERVISOR",
-                senderName: "Supervisor",
-                recipient: scope === 'ALL' ? 'ALL' : targetEmail.trim(),
-                text: msgBody.trim(),
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            await fetch(`${BACKEND_URL}/api/messages`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sender_email: 'SUPERVISOR',
+                    receiver_email: scope === 'ALL' ? 'ALL' : targetEmail.trim(),
+                    content: msgBody.trim()
+                })
             });
 
             alert("Message deployed successfully!");
             setMsgBody('');
             setTargetEmail('');
+            fetchStudentsAndMessages();
         } catch (err: any) {
             alert("Dispatch error: " + err.message);
         } finally {

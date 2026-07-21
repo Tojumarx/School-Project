@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { auth } from '../firebase';
+import { supabase } from '../supabaseClient';
 import './Layout.css';
 
 export const StudentLayout: React.FC = () => {
@@ -10,25 +10,39 @@ export const StudentLayout: React.FC = () => {
     const navigate = useNavigate();
 
     useEffect(() => {
-        const unsubscribe = auth.onAuthStateChanged(user => {
-            if (user) {
-                const email = user.email ? user.email.toLowerCase() : '';
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session?.user) {
+                const email = session.user.email ? session.user.email.toLowerCase() : '';
                 if (email.includes('admin') || email.includes('supervisor')) {
                     navigate('/supervisor/dashboard');
                     return;
                 }
-                setUserDisplay(`👤 ${user.displayName || user.email}`);
+                setUserDisplay(`👤 ${session.user.user_metadata?.full_name || session.user.email}`);
             } else {
                 navigate('/');
             }
         });
-        return () => unsubscribe();
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (session?.user) {
+                const email = session.user.email ? session.user.email.toLowerCase() : '';
+                if (email.includes('admin') || email.includes('supervisor')) {
+                    navigate('/supervisor/dashboard');
+                    return;
+                }
+                setUserDisplay(`👤 ${session.user.user_metadata?.full_name || session.user.email}`);
+            } else {
+                navigate('/');
+            }
+        });
+
+        return () => subscription.unsubscribe();
     }, [navigate]);
 
     const handleLogout = async (e: React.MouseEvent) => {
         e.preventDefault();
         try {
-            await auth.signOut();
+            await supabase.auth.signOut();
             navigate('/');
         } catch (err: any) {
             alert("Logout failed: " + err.message);

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth, firebaseConfig } from '../../firebase';
-import firebase from 'firebase/compat/app';
+import { supabase, BACKEND_URL } from '../../supabaseClient';
 import './Students.css';
 
 interface StudentProfile {
@@ -18,28 +17,23 @@ export const SupervisorStudents: React.FC = () => {
     const [submitting, setSubmitting] = useState<boolean>(false);
 
     useEffect(() => {
-        const unsubscribeAuth = auth.onAuthStateChanged(user => {
-            if (user) {
-                fetchSupervisedStudents();
-            }
-        });
-        return () => unsubscribeAuth();
+        fetchSupervisedStudents();
     }, []);
 
-    const fetchSupervisedStudents = () => {
-        db.collection('student_profiles').onSnapshot(snap => {
-            const list: StudentProfile[] = [];
-            snap.forEach(doc => {
-                const d = doc.data();
-                list.push({
-                    id: doc.id,
-                    fullName: d.fullName || 'Anonymous',
-                    gender: d.gender || 'Not specified',
-                    email: d.email || ''
-                });
-            });
+    const fetchSupervisedStudents = async () => {
+        try {
+            const res = await fetch(`${BACKEND_URL}/api/students`);
+            const data = await res.json();
+            const list: StudentProfile[] = data.map((d: any) => ({
+                id: d.id,
+                fullName: d.full_name || 'Anonymous',
+                gender: d.gender || 'Not specified',
+                email: d.email || ''
+            }));
             setStudents(list);
-        });
+        } catch (err) {
+            console.error("Failed to load students list: ", err);
+        }
     };
 
     const handleCreateStudent = async (e: React.FormEvent) => {
@@ -51,31 +45,26 @@ export const SupervisorStudents: React.FC = () => {
 
         setSubmitting(true);
         try {
-            // Provision secondary instance to prevent supervisor logout
-            let secondaryApp = firebase.initializeApp(firebaseConfig, "SecondaryInstance");
-            const res = await secondaryApp.auth().createUserWithEmailAndPassword(newEmail.trim(), newPass);
-            
-            if (res.user) {
-                await db.collection('student_profiles').doc(newEmail.trim()).set({
-                    email: newEmail.trim(),
-                    fullName: newEmail.split('@')[0].toUpperCase(),
-                    gender: "Not specified",
-                    dob: "",
-                    avatar: "",
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            }
+            // Sign up student in Supabase
+            const { error } = await supabase.auth.signUp({
+                email: newEmail.trim(),
+                password: newPass,
+                options: {
+                    data: {
+                        full_name: newEmail.split('@')[0].toUpperCase(),
+                        role: 'student'
+                    }
+                }
+            });
+
+            if (error) throw error;
 
             alert(`Account successfully created for ${newEmail.trim()}!`);
             setNewEmail('');
             setNewPass('');
-            await firebase.app("SecondaryInstance").delete();
+            fetchSupervisedStudents();
         } catch (err: any) {
             alert("Error provisioning profile: " + err.message);
-            // Attempt secondary cleanup if initialized
-            try {
-                await firebase.app("SecondaryInstance").delete();
-            } catch (e) {}
         } finally {
             setSubmitting(false);
         }
@@ -182,7 +171,7 @@ export const SupervisorStudents: React.FC = () => {
                     </form>
                 </div>
 
-            </div>
+                </div>
         </div>
     );
 };

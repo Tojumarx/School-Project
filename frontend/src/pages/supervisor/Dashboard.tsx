@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '../../firebase';
+import { BACKEND_URL } from '../../supabaseClient';
 import './Dashboard.css';
 
 interface LogPipelineEntry {
@@ -25,85 +25,66 @@ export const SupervisorDashboard: React.FC = () => {
     const [pendingDates, setPendingDates] = useState<Set<string>>(new Set());
 
     useEffect(() => {
-        const unsubscribeAuth = auth.onAuthStateChanged(user => {
-            if (user) {
-                // Fetch metrics
-                fetchMetrics();
-
-                // Listen to pending logs in pipeline
-                const unsubscribeLogs = db.collection('siwes_logs')
-                    .where("status", "==", "Pending")
-                    .orderBy("timestamp", "desc")
-                    .onSnapshot(snap => {
-                        const list: LogPipelineEntry[] = [];
-                        const datesSet = new Set<string>();
-
-                        snap.forEach(doc => {
-                            const d = doc.data();
-                            if (d.date) {
-                                datesSet.add(d.date);
-                            }
-                            list.push({
-                                id: doc.id,
-                                studentName: d.studentName || 'Student',
-                                email: d.email || '',
-                                date: d.date || '',
-                                activity: d.activity || '',
-                                photoProof: d.photoProof || '',
-                                location: {
-                                    lat: d.location?.lat || 0,
-                                    lng: d.location?.lng || 0
-                                },
-                                status: d.status || 'Pending'
-                            });
-                        });
-
-                        setPendingLogs(list);
-                        setPendingDates(datesSet);
-                        // Refresh metrics counts when snap changes
-                        setTotalPending(snap.size);
-                    });
-
-                return () => {
-                    unsubscribeLogs();
-                };
-            }
-        });
-        return () => unsubscribeAuth();
+        fetchLogsAndMetrics();
     }, []);
 
-    const fetchMetrics = () => {
-        const today = new Date();
-        const yesterdayStr = getFormattedOffsetDate(-1);
+    const fetchLogsAndMetrics = async () => {
+        try {
+            const res = await fetch(`${BACKEND_URL}/api/entries`);
+            const allEntries = await res.json();
 
-        const startOfWeek = new Date();
-        startOfWeek.setDate(today.getDate() - today.getDay());
-        startOfWeek.setHours(0, 0, 0, 0);
+            const pendingList: LogPipelineEntry[] = [];
+            const datesSet = new Set<string>();
 
-        db.collection('siwes_logs').where("status", "==", "Pending").get().then(snap => {
-            setTotalPending(snap.size);
-        });
+            const yesterdayStr = getFormattedOffsetDate(-1);
+            const startOfWeek = new Date();
+            const today = new Date();
+            startOfWeek.setDate(today.getDate() - today.getDay());
+            startOfWeek.setHours(0, 0, 0, 0);
 
-        db.collection('siwes_logs').get().then(snap => {
             let yesterday = 0;
             let weekly = 0;
+            let pendingCount = 0;
 
-            snap.forEach(doc => {
-                const d = doc.data();
+            allEntries.forEach((d: any) => {
+                if (d.status === "Pending" || d.status === "pending") {
+                    pendingCount++;
+                    if (d.date) datesSet.add(d.date);
+                    pendingList.push({
+                        id: d.id,
+                        studentName: d.student_name || 'Student',
+                        email: d.student_email || '',
+                        date: d.date || '',
+                        activity: d.description || '',
+                        photoProof: d.image_url || '',
+                        location: {
+                            lat: d.location?.latitude || 0,
+                            lng: d.location?.longitude || 0
+                        },
+                        status: d.status
+                    });
+                }
+
                 if (d.date === yesterdayStr) {
                     yesterday++;
                 }
-                if (d.timestamp) {
-                    const tDate = d.timestamp.toDate();
+
+                if (d.created_at) {
+                    const tDate = new Date(d.created_at);
                     if (tDate >= startOfWeek) {
                         weekly++;
                     }
                 }
             });
 
+            setPendingLogs(pendingList);
+            setPendingDates(datesSet);
+            setTotalPending(pendingCount);
             setYesterdayCount(yesterday);
             setWeeklyTotal(weekly);
-        });
+        } catch (err) {
+            console.error("Failed to fetch supervisor dashboard metrics: ", err);
+        }
     };
 
     const getFormattedOffsetDate = (offset: number): string => {
@@ -114,8 +95,12 @@ export const SupervisorDashboard: React.FC = () => {
 
     const handleApprove = async (id: string) => {
         try {
-            await db.collection('siwes_logs').doc(id).update({ status: "Approved" });
-            fetchMetrics();
+            await fetch(`${BACKEND_URL}/api/entries/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: "Approved" })
+            });
+            fetchLogsAndMetrics();
         } catch (err: any) {
             alert("Approval error: " + err.message);
         }
@@ -123,8 +108,12 @@ export const SupervisorDashboard: React.FC = () => {
 
     const handleReject = async (id: string) => {
         try {
-            await db.collection('siwes_logs').doc(id).update({ status: "Rejected" });
-            fetchMetrics();
+            await fetch(`${BACKEND_URL}/api/entries/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: "Rejected" })
+            });
+            fetchLogsAndMetrics();
         } catch (err: any) {
             alert("Rejection error: " + err.message);
         }

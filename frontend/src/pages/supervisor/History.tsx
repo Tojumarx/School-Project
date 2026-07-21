@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { db, auth } from '../../firebase';
-import firebase from 'firebase/compat/app';
+import React, { useState } from 'react';
+import { BACKEND_URL } from '../../supabaseClient';
 import './History.css';
 
 interface LogArchiveEntry {
@@ -10,7 +9,6 @@ interface LogArchiveEntry {
     date: string;
     activity: string;
     status: string;
-    timestamp?: firebase.firestore.Timestamp;
 }
 
 export const SupervisorHistory: React.FC = () => {
@@ -21,58 +19,37 @@ export const SupervisorHistory: React.FC = () => {
     const [loading, setLoading] = useState<boolean>(false);
     const [hasSearched, setHasSearched] = useState<boolean>(false);
 
-    useEffect(() => {
-        const unsubscribeAuth = auth.onAuthStateChanged(user => {
-            if (!user) {
-                // Not authenticated
-            }
-        });
-        return () => unsubscribeAuth();
-    }, []);
-
     const runArchiveSearch = async () => {
         setLoading(true);
         setHasSearched(true);
         try {
-            let query: firebase.firestore.Query = db.collection('siwes_logs');
-            
-            if (startDate && endDate) {
-                const sTS = firebase.firestore.Timestamp.fromDate(new Date(startDate));
-                const eObj = new Date(endDate);
-                eObj.setHours(23, 59, 59);
-                const eTS = firebase.firestore.Timestamp.fromDate(eObj);
-                
-                query = query.where("timestamp", ">=", sTS).where("timestamp", "<=", eTS);
-            }
-
-            const snapshot = await query.orderBy("timestamp", "desc").get();
-            const list: LogArchiveEntry[] = [];
+            const res = await fetch(`${BACKEND_URL}/api/entries`);
+            const data = await res.json();
             const term = searchTerm.toLowerCase().trim();
 
-            snapshot.forEach((doc: any) => {
-                const d = doc.data();
-                
-                // Match search term locally
-                const nameMatch = d.studentName ? d.studentName.toLowerCase().includes(term) : false;
-                const emailMatch = d.email ? d.email.toLowerCase().includes(term) : false;
+            let list: LogArchiveEntry[] = data.map((d: any) => ({
+                id: d.id,
+                studentName: d.student_name || 'Student',
+                email: d.student_email || '',
+                date: d.date || '',
+                activity: d.description || '',
+                status: d.status || 'Pending'
+            }));
 
-                if (term === "" || nameMatch || emailMatch) {
-                    list.push({
-                        id: doc.id,
-                        studentName: d.studentName || 'Student',
-                        email: d.email || '',
-                        date: d.date || '',
-                        activity: d.activity || '',
-                        status: d.status || 'Pending',
-                        timestamp: d.timestamp
-                    });
-                }
-            });
+            if (startDate && endDate) {
+                list = list.filter(item => item.date >= startDate && item.date <= endDate);
+            }
+
+            if (term) {
+                list = list.filter(item => 
+                    item.studentName.toLowerCase().includes(term) ||
+                    item.email.toLowerCase().includes(term)
+                );
+            }
 
             setArchiveLogs(list);
         } catch (err: any) {
-            alert("Search pattern requires Firestore indexing if sorting with date bounds. Make sure your indexes are built.");
-            console.error(err);
+            console.error("Failed to query log archives: ", err);
         } finally {
             setLoading(false);
         }

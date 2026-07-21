@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '../../firebase';
+import { supabase } from '../../supabaseClient';
 import './Settings.css';
 
 export const StudentSettings: React.FC = () => {
@@ -10,40 +10,31 @@ export const StudentSettings: React.FC = () => {
     const [saving, setSaving] = useState<boolean>(false);
 
     useEffect(() => {
-        const unsubscribe = auth.onAuthStateChanged(user => {
-            if (user) {
-                db.collection('student_profiles').doc(user.email!).get().then(doc => {
-                    if (doc.exists) {
-                        const d = doc.data();
-                        setFullName(d?.fullName || user.displayName || '');
-                        setGender(d?.gender || 'Male');
-                        setDob(d?.dob || '');
-                        setAvatarUrl(d?.avatar || '');
-                    } else {
-                        setFullName(user.displayName || '');
-                    }
-                });
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session?.user) {
+                const metadata = session.user.user_metadata || {};
+                setFullName(metadata.full_name || session.user.email?.split('@')[0] || '');
+                setGender(metadata.gender || 'Male');
+                setDob(metadata.dob || '');
+                setAvatarUrl(metadata.avatar_url || '');
             }
         });
-        return () => unsubscribe();
     }, []);
 
     const handleSaveProfile = async (e: React.FormEvent) => {
         e.preventDefault();
-        const user = auth.currentUser;
-        if (!user) return;
-
         setSaving(true);
         try {
-            await user.updateProfile({ displayName: fullName.trim() });
-            await db.collection('student_profiles').doc(user.email!).set({
-                fullName: fullName.trim(),
-                gender: gender,
-                dob: dob,
-                avatar: avatarUrl.trim(),
-                email: user.email
-            }, { merge: true });
+            const { error } = await supabase.auth.updateUser({
+                data: {
+                    full_name: fullName.trim(),
+                    gender: gender,
+                    dob: dob,
+                    avatar_url: avatarUrl.trim()
+                }
+            });
 
+            if (error) throw error;
             alert("Profile records updated!");
         } catch (err: any) {
             alert("Error updating profile: " + err.message);

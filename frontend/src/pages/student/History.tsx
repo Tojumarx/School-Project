@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '../../firebase';
-import firebase from 'firebase/compat/app';
+import { supabase, BACKEND_URL } from '../../supabaseClient';
 import './History.css';
 
 interface LogEntry {
@@ -9,7 +8,6 @@ interface LogEntry {
     activity: string;
     status: string;
     photoProof?: string;
-    timestamp?: firebase.firestore.Timestamp;
 }
 
 export const StudentHistory: React.FC = () => {
@@ -20,75 +18,60 @@ export const StudentHistory: React.FC = () => {
     const [filtered, setFiltered] = useState<boolean>(false);
 
     useEffect(() => {
-        const unsubscribeAuth = auth.onAuthStateChanged(user => {
-            if (user) {
-                // Fetch all logs initially
-                fetchHistory('all', user.email!);
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session?.user?.email) {
+                fetchHistory('all', session.user.email);
             }
         });
-        return () => unsubscribeAuth();
     }, []);
 
-    const fetchHistory = (mode: 'all' | 'custom', userEmail: string) => {
+    const fetchHistory = async (mode: 'all' | 'custom', userEmail: string) => {
         setLoading(true);
-        let query = db.collection('siwes_logs').where("email", "==", userEmail);
+        try {
+            const res = await fetch(`${BACKEND_URL}/api/entries?studentEmail=${encodeURIComponent(userEmail)}`);
+            const data = await res.json();
 
-        if (mode === 'custom') {
-            if (!startDate || !endDate) {
-                alert("Please fill both date fields.");
-                setLoading(false);
-                return;
-            }
+            let list: LogEntry[] = data.map((d: any) => ({
+                id: d.id,
+                date: d.date || '',
+                activity: d.description || '',
+                status: d.status || 'Pending',
+                photoProof: d.image_url
+            }));
 
-            const startTS = firebase.firestore.Timestamp.fromDate(new Date(startDate));
-            const endVal = new Date(endDate);
-            endVal.setHours(23, 59, 59);
-            const endTS = firebase.firestore.Timestamp.fromDate(endVal);
-
-            query = query.where("timestamp", ">=", startTS).where("timestamp", "<=", endTS);
-            setFiltered(true);
-        } else {
-            setFiltered(false);
-        }
-
-        query.orderBy("timestamp", "desc").onSnapshot(snapshot => {
-            const list: LogEntry[] = [];
-            snapshot.forEach(doc => {
-                const data = doc.data();
-                list.push({
-                    id: doc.id,
-                    date: data.date || '',
-                    activity: data.activity || '',
-                    status: data.status || 'Pending',
-                    photoProof: data.photoProof,
-                    timestamp: data.timestamp
-                });
-            });
-            setLogs(list);
-            setLoading(false);
-        }, err => {
-            console.error("Firestore history snapshot error: ", err);
-            // Fallback query if ordering + where query requires building composite indexes
             if (mode === 'custom') {
-                alert("If this search fails, please check if Firestore composite indexes are built.");
+                if (!startDate || !endDate) {
+                    alert("Please fill both date fields.");
+                    setLoading(false);
+                    return;
+                }
+                list = list.filter(item => item.date >= startDate && item.date <= endDate);
+                setFiltered(true);
+            } else {
+                setFiltered(false);
             }
-            setLoading(false);
-        });
-    };
 
-    const handleApplyFilter = () => {
-        const user = auth.currentUser;
-        if (user) {
-            fetchHistory('custom', user.email!);
+            setLogs(list);
+        } catch (err) {
+            console.error("Failed to load history: ", err);
+        } finally {
+            setLoading(false);
         }
     };
 
-    const handleResetFilter = () => {
+    const handleApplyFilter = async () => {
+        const session = (await supabase.auth.getSession()).data.session;
+        if (session?.user?.email) {
+            fetchHistory('custom', session.user.email);
+        }
+    };
+
+    const handleResetFilter = async () => {
         setStartDate('');
         setEndDate('');
-        const user = auth.currentUser;
-        if (user) {
-            fetchHistory('all', user.email!);
+        const session = (await supabase.auth.getSession()).data.session;
+        if (session?.user?.email) {
+            fetchHistory('all', session.user.email);
         }
     };
 

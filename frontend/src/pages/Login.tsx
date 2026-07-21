@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { auth } from '../firebase';
+import { supabase } from '../supabaseClient';
 import coverImg from '../assets/login_cover.png';
 import './Login.css';
 
@@ -11,10 +11,10 @@ export const Login: React.FC = () => {
     const navigate = useNavigate();
 
     useEffect(() => {
-        // If user is already logged in, redirect them accordingly
-        const unsubscribe = auth.onAuthStateChanged(user => {
-            if (user) {
-                const userEmail = user.email ? user.email.toLowerCase() : '';
+        // Check current Supabase auth session
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session?.user) {
+                const userEmail = session.user.email ? session.user.email.toLowerCase() : '';
                 if (userEmail.includes('admin') || userEmail.includes('supervisor')) {
                     navigate('/supervisor/dashboard');
                 } else {
@@ -22,15 +22,33 @@ export const Login: React.FC = () => {
                 }
             }
         });
-        return () => unsubscribe();
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (session?.user) {
+                const userEmail = session.user.email ? session.user.email.toLowerCase() : '';
+                if (userEmail.includes('admin') || userEmail.includes('supervisor')) {
+                    navigate('/supervisor/dashboard');
+                } else {
+                    navigate('/student/dashboard');
+                }
+            }
+        });
+
+        return () => subscription.unsubscribe();
     }, [navigate]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         try {
-            const credential = await auth.signInWithEmailAndPassword(email.trim(), password);
-            const userEmail = credential.user?.email?.toLowerCase() || '';
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email: email.trim(),
+                password: password,
+            });
+
+            if (error) throw error;
+
+            const userEmail = data.user?.email?.toLowerCase() || '';
             if (userEmail.includes('admin') || userEmail.includes('supervisor')) {
                 navigate('/supervisor/dashboard');
             } else {

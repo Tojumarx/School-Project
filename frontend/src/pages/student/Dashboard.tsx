@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '../../firebase';
-import firebase from 'firebase/compat/app';
+import { supabase, BACKEND_URL } from '../../supabaseClient';
 import './Dashboard.css';
 
 interface StudentProfile {
@@ -42,58 +41,48 @@ export const StudentDashboard: React.FC = () => {
             );
         }
 
-        const unsubscribeAuth = auth.onAuthStateChanged(user => {
-            if (user) {
-                // Load Profile
-                db.collection('student_profiles').doc(user.email!).onSnapshot(doc => {
-                    if (doc.exists) {
-                        const d = doc.data() as StudentProfile;
-                        setProfile({
-                            fullName: d.fullName || user.displayName || "SIWES Student",
-                            email: user.email!,
-                            gender: d.gender,
-                            dob: d.dob,
-                            avatar: d.avatar
-                        });
-                    } else {
-                        setProfile({
-                            fullName: user.displayName || "SIWES Student",
-                            email: user.email!
-                        });
-                    }
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session?.user) {
+                const user = session.user;
+                const email = user.email!;
+
+                setProfile({
+                    fullName: user.user_metadata?.full_name || email.split('@')[0],
+                    email: email,
+                    gender: user.user_metadata?.gender,
+                    dob: user.user_metadata?.dob,
+                    avatar: user.user_metadata?.avatar_url
                 });
 
-                // Load Stats & Calendar logs
-                const startOfWeek = new Date();
-                const today = new Date();
-                startOfWeek.setDate(today.getDate() - today.getDay());
-                startOfWeek.setHours(0, 0, 0, 0);
-
-                const yesterdayStr = getFormattedOffsetDate(-1);
-
-                const unsubscribeLogs = db.collection('siwes_logs')
-                    .where("email", "==", user.email)
-                    .onSnapshot(snap => {
+                // Fetch entries from NestJS Backend
+                fetch(`${BACKEND_URL}/api/entries?studentEmail=${encodeURIComponent(email)}`)
+                    .then(res => res.json())
+                    .then(entries => {
                         const tempMap: Record<string, string> = {};
                         let unverified = 0;
                         let thisWeek = 0;
                         let yStatus = "No Log Filed";
                         let yClass = "status-Rejected";
 
-                        snap.forEach(doc => {
-                            const d = doc.data();
-                            if (d.date) {
-                                tempMap[d.date] = d.status;
+                        const yesterdayStr = getFormattedOffsetDate(-1);
+                        const startOfWeek = new Date();
+                        const today = new Date();
+                        startOfWeek.setDate(today.getDate() - today.getDay());
+                        startOfWeek.setHours(0, 0, 0, 0);
 
-                                if (d.date === yesterdayStr) {
-                                    yStatus = d.status;
-                                    yClass = `status-${d.status}`;
+                        entries.forEach((e: any) => {
+                            if (e.date) {
+                                tempMap[e.date] = e.status;
+
+                                if (e.date === yesterdayStr) {
+                                    yStatus = e.status;
+                                    yClass = `status-${e.status}`;
                                 }
                             }
-                            if (d.status === "Pending") unverified++;
+                            if (e.status === "Pending" || e.status === "pending") unverified++;
 
-                            if (d.timestamp) {
-                                const tDate = d.timestamp.toDate();
+                            if (e.created_at) {
+                                const tDate = new Date(e.created_at);
                                 if (tDate >= startOfWeek) {
                                     thisWeek++;
                                 }
@@ -105,15 +94,10 @@ export const StudentDashboard: React.FC = () => {
                         setYesterdayClass(yClass);
                         setWeeklyCount(thisWeek);
                         setUnverifiedCount(unverified);
-                    });
-
-                return () => {
-                    unsubscribeLogs();
-                };
+                    })
+                    .catch(err => console.error("Error fetching logs: ", err));
             }
         });
-
-        return () => unsubscribeAuth();
     }, []);
 
     const getFormattedOffsetDate = (offset: number): string => {
@@ -124,8 +108,8 @@ export const StudentDashboard: React.FC = () => {
 
     const handleFormSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const user = auth.currentUser;
-        if (!user) return;
+        const session = (await supabase.auth.getSession()).data.session;
+        if (!session?.user) return;
 
         if (lat === null || lng === null) {
             alert("Please allow location tracking access to verify this log.");
@@ -134,21 +118,27 @@ export const StudentDashboard: React.FC = () => {
 
         setSubmitting(true);
         try {
-            await db.collection('siwes_logs').add({
-                email: user.email,
-                studentName: profile?.fullName || user.displayName || "Student",
-                date: logDate,
-                activity: activity.trim(),
-                photoProof: photoUrl.trim(),
-                location: { lat, lng },
-                status: "Pending",
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            const response = await fetch(`${BACKEND_URL}/api/entries`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    student_email: session.user.email,
+                    student_name: profile?.fullName || session.user.email,
+                    date: logDate,
+                    description: activity.trim(),
+                    image_url: photoUrl.trim(),
+                    location: { latitude: lat, longitude: lng },
+                    status: "Pending"
+                })
             });
+
+            if (!response.ok) throw new Error("Failed to save entry");
 
             alert("Log saved successfully!");
             setLogDate('');
             setPhotoUrl('');
             setActivity('');
+            window.location.reload();
         } catch (err: any) {
             alert("Submission error: " + err.message);
         } finally {
