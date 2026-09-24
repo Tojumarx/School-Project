@@ -1,0 +1,13 @@
+/* Supervisor Students Page — two-column provision layout */
+.students-panel-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 24px;
+    align-items: flex-start;
+}
+
+@media (max-width: 900px) {
+    .students-panel-grid {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,0 +1,13 @@
+/* Student Messages Page — chat bubble and message input area */
+.messages-input-row {
+    display: flex;
+    gap: 12px;
+}
+
+.messages-input-row input {
+    flex: 1;
+}
+
+.msg-sent-bubble {
+    margin-left: auto;
+}
