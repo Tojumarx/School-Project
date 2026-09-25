@@ -1,0 +1,79 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            Int      @id @default(autoincrement())
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  email         String   @unique
+  password      String
+  full_name     String
+  role          String   // "student" | "supervisor" | "admin"
+  
+  // Student specific details (null if supervisor)
+  student_id    String?
+  course        String?
+  level         String?
+  department    String?
+  institution   String?
+  gender        String?
+  
+  // Supervisor linking
+  supervisor_id Int?
+  supervisor    User?    @relation("SupervisorToStudents", fields: [supervisor_id], references: [id])
+  students      User[]   @relation("SupervisorToStudents")
+  
+  // Supervisor specific details
+  title         String?
+  office_loc    String?
+
+  entries       Entry[]
+  sentMessages  Message[] @relation("SentMessages")
+  announcements Announcement[]
+}
+
+model Entry {
+  id             Int      @id @default(autoincrement())
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  date           String
+  day            String
+  activity       String
+  learnings      String
+  latitude       Float?
+  longitude      Float?
+  location_name  String?
+  student_email  String
+  user_id        Int?
+  user           User?    @relation(fields: [user_id], references: [id])
+}
+
+model Announcement {
+  id         Int      @id @default(autoincrement())
+  created_at DateTime @default(now())
+  title      String
+  content    String
+  author_id  Int?
+  author     User?    @relation(fields: [author_id], references: [id])
+}
+
+model Message {
+  id          Int      @id @default(autoincrement())
+  created_at  DateTime @default(now())
+  sender_email String
+  receiver_id Int?
+  content     String
+  sender_id   Int?
+  sender      User?    @relation("SentMessages", fields: [sender_id], references: [id])
+}
