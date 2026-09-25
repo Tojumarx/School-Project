@@ -1,72 +1,66 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, Query } from '@nestjs/common';
-import { SupabaseService } from './supabase.service';
+import { Controller, Get, Post, Body, Param, Put, Query } from '@nestjs/common';
+import { AppService } from './app.service';
 
 @Controller('api')
 export class AppController {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(private readonly appService: AppService) {}
+
+  @Get()
+  getHello(): string {
+    return this.appService.getHello();
+  }
 
   // --- ENTRIES ---
   @Get('entries')
   async getEntries(@Query('studentEmail') studentEmail?: string) {
-    let query = this.supabaseService.getClient().from('entries').select('*').order('date', { ascending: false });
-    if (studentEmail) {
-      query = query.eq('student_email', studentEmail);
-    }
-    const { data, error } = await query;
-    if (error) throw new Error(error.message);
-    return data;
+    return this.appService.getEntries(studentEmail);
   }
 
   @Post('entries')
   async createEntry(@Body() body: any) {
-    const { data, error } = await this.supabaseService.getClient().from('entries').insert([body]).select();
-    if (error) throw new Error(error.message);
-    return data[0];
+    return this.appService.createEntry(body);
   }
 
   @Put('entries/:id')
   async updateEntry(@Param('id') id: string, @Body() body: any) {
-    const { data, error } = await this.supabaseService.getClient().from('entries').update(body).eq('id', id).select();
-    if (error) throw new Error(error.message);
-    return data[0];
+    return this.appService.updateEntry(id, body);
   }
 
   // --- ANNOUNCEMENTS ---
   @Get('announcements')
   async getAnnouncements() {
-    const { data, error } = await this.supabaseService.getClient().from('announcements').select('*').order('created_at', { ascending: false });
-    if (error) throw new Error(error.message);
-    return data;
+    return this.appService.getAnnouncements();
   }
 
   @Post('announcements')
   async createAnnouncement(@Body() body: any) {
-    const { data, error } = await this.supabaseService.getClient().from('announcements').insert([body]).select();
-    if (error) throw new Error(error.message);
-    return data[0];
+    return this.appService.createAnnouncement(body);
   }
 
   // --- MESSAGES ---
   @Get('messages')
   async getMessages(@Query('email') email?: string) {
-    let query = this.supabaseService.getClient().from('messages').select('*').order('created_at', { ascending: true });
-    const { data, error } = await query;
-    if (error) throw new Error(error.message);
-    return data;
+    return this.appService.getMessages(email);
   }
 
   @Post('messages')
   async sendMessage(@Body() body: any) {
-    const { data, error } = await this.supabaseService.getClient().from('messages').insert([body]).select();
-    if (error) throw new Error(error.message);
-    return data[0];
+    return this.appService.sendMessage(body);
   }
 
-  // --- PROFILES / STUDENTS ---
+  // --- USERS / STUDENTS / SUPERVISORS ---
   @Get('students')
   async getStudents() {
-    const { data, error } = await this.supabaseService.getClient().from('profiles').select('*').eq('role', 'student');
-    if (error) throw new Error(error.message);
-    return data;
+    return this.appService.getStudents();
+  }
+
+  @Get('supervisors')
+  async getSupervisors(@Query('query') query?: string) {
+    return this.appService.getSupervisors(query);
+  }
+
+  @Put('profiles/:id')
+  async updateProfile(@Param('id') id: string, @Body() body: any) {
+    return this.appService.updateProfile(id, body);
   }
 }
