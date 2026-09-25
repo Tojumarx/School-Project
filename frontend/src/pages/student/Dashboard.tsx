@@ -299,7 +299,7 @@ export const StudentDashboard: React.FC = () => {
                 {/* Right Workspace: Visual Calendar Heatmap Panel */}
                 <div className="calendar-wrapper">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                        <h3 style={{ fontWeight: 800, color: 'var(--primary-slate)' }}>📅 Calendar Activity Heatmap</h3>
+                        <h3 style={{ fontWeight: 800, color: 'var(--primary-slate)' }}>📅 Calendar Activity Heatmaps</h3>
                         <h4 style={{ color: 'var(--accent-blue)', fontWeight: 700 }}>{currentMonthLabel}</h4>
                     </div>
                     
