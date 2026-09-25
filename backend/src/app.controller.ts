@@ -59,6 +59,22 @@ export class AppController {
     return this.appService.getSupervisors(query);
   }
 
+  // --- AUTH & USER SYNC ---
+  @Post('auth/sync-user')
+  async syncUser(@Body() body: any) {
+    return this.appService.syncUser(body);
+  }
+
+  @Post('auth/register')
+  async register(@Body() body: any) {
+    return this.appService.registerUser(body);
+  }
+
+  @Post('auth/login')
+  async login(@Body() body: any) {
+    return this.appService.loginUser(body);
+  }
+
   @Put('profiles/:id')
   async updateProfile(@Param('id') id: string, @Body() body: any) {
     return this.appService.updateProfile(id, body);

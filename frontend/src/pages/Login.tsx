@@ -49,6 +49,7 @@ export const Login: React.FC = () => {
         e.preventDefault();
         setLoading(true);
         try {
+            // First authenticate with Supabase Auth
             const { data, error } = await supabase.auth.signInWithPassword({
                 email: email.trim(),
                 password: password,
@@ -57,6 +58,19 @@ export const Login: React.FC = () => {
             if (error) throw error;
 
             const userRole = data.user?.user_metadata?.role || (email.includes('supervisor') ? 'supervisor' : 'student');
+
+            // Sync user profile to PostgreSQL DB via backend API
+            await fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'}/api/auth/sync-user`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: data.user.email,
+                    full_name: data.user.user_metadata?.full_name || email.split('@')[0],
+                    role: userRole,
+                    ...data.user.user_metadata,
+                }),
+            }).catch(console.error);
+
             if (userRole === 'supervisor') {
                 navigate('/supervisor/dashboard');
             } else {
@@ -87,26 +101,31 @@ export const Login: React.FC = () => {
         }
     };
 
-    // Flexible Fuzzy Search for Supervisors (non-word-for-word match)
+    // Flexible Search for Supervisors calling Backend API
     const handleSearchSupervisors = async () => {
         setSearching(true);
         try {
-            const queryClean = searchQuery.trim().toLowerCase();
-            
-            // Fetch supervisors from profiles table
+            const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+            const res = await fetch(`${backendUrl}/api/supervisors?query=${encodeURIComponent(searchQuery.trim())}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.length > 0) {
+                    setSupervisors(data);
+                    return;
+                }
+            }
+
+            // Fallback search via Supabase if backend returns empty
             const { data, error } = await supabase
                 .from('profiles')
                 .select('*')
                 .eq('role', 'supervisor');
 
-            if (error) throw error;
-
-            if (data) {
-                // Perform fuzzy multi-word or partial word match on frontend as fallback / enhancement
+            if (!error && data) {
+                const queryClean = searchQuery.trim().toLowerCase();
                 const filtered = data.filter((sup: any) => {
                     const sName = (sup.full_name || sup.name || sup.email || '').toLowerCase();
                     if (!queryClean) return true;
-                    // Check if all search tokens match partially
                     const tokens = queryClean.split(/\s+/);
                     return tokens.every(token => sName.includes(token));
                 });
@@ -114,7 +133,6 @@ export const Login: React.FC = () => {
             }
         } catch (err: any) {
             console.error('Search error:', err.message);
-            // Fallback list for demo if table is fresh
             setSupervisors([
                 { id: '1', full_name: 'Dr. O. A. Bode', email: 'bode@fupre.edu.ng', department: 'Computer Science', institution: 'FUPRE' },
                 { id: '2', full_name: 'Prof. E. K. Akpata', email: 'akpata@fupre.edu.ng', department: 'Electrical Eng', institution: 'FUPRE' },
@@ -152,6 +170,7 @@ export const Login: React.FC = () => {
                 })
             };
 
+            // Sign up on Supabase Auth
             const { data, error } = await supabase.auth.signUp({
                 email: email.trim(),
                 password: password,
@@ -162,18 +181,19 @@ export const Login: React.FC = () => {
 
             if (error) throw error;
 
-            // Upsert into public.profiles if configured
-            if (data.user) {
-                await supabase.from('profiles').insert([{
-                    id: data.user.id,
+            // Direct sync to Database via NestJS backend (replicating atlas-dev pattern)
+            const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+            await fetch(`${backendUrl}/api/auth/sync-user`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
                     email: email.trim(),
-                    full_name: fullName,
-                    role: role,
-                    ...metadata
-                }]);
-            }
+                    password: password,
+                    ...metadata,
+                }),
+            });
 
-            alert("Account created successfully! Proceeding to your portal...");
+            alert("Account created successfully! Saved to Database & Auth provider.");
             if (role === 'supervisor') {
                 navigate('/supervisor/dashboard');
             } else {
