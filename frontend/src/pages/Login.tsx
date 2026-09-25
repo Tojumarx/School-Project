@@ -171,7 +171,7 @@ export const Login: React.FC = () => {
             };
 
             // Sign up on Supabase Auth
-            const { data, error } = await supabase.auth.signUp({
+            const { error } = await supabase.auth.signUp({
                 email: email.trim(),
                 password: password,
                 options: {
@@ -480,6 +480,21 @@ export const Login: React.FC = () => {
                             <div className="form-group">
                                 <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Course of Study</label>
                                 <input type="text" value={course} onChange={(e) => setCourse(e.target.value)} placeholder="Computer Science" required />
+                            </div>
+                            <div className="form-group">
+                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Level</label>
+                                <select value={level} onChange={(e) => setLevel(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                                    <option value="300">300 Level</option>
+                                    <option value="400">400 Level</option>
+                                    <option value="500">500 Level</option>
+                                </select>
+                            </div>
+                            <div className="form-group">
+                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Gender</label>
+                                <select value={gender} onChange={(e) => setGender(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                </select>
                             </div>
                             <div className="form-group">
                                 <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Department</label>
