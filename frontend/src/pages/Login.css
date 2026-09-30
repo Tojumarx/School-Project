@@ -9,11 +9,13 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    padding: 60px 40px;
+    justify-content: flex-start;
+    padding: 40px 40px 60px 40px;
     background-color: #ffffff;
-    max-width: 550px;
+    max-width: 580px;
     width: 100%;
+    height: 100vh;
+    overflow-y: auto;
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.03);
     z-index: 2;
 }
@@ -64,10 +66,127 @@
     max-width: 600px;
 }
 
+.role-card {
+    border: 2px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 24px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    background-color: #ffffff;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
 .role-card:hover {
-    border-color: var(--primary-slate) !important;
-    background-color: #f1f5f9 !important;
-    transform: translateY(-2px);
+    border-color: #3b82f6 !important;
+    background-color: #f8fafc !important;
+    transform: translateY(-4px);
+    box-shadow: 0 12px 20px -5px rgba(59, 130, 246, 0.15) !important;
+}
+
+.role-card.selected {
+    border-color: #2563eb !important;
+    background-color: #eff6ff !important;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2) !important;
+}
+
+/* Standalone Full-Page Onboarding Layout */
+.onboarding-container {
+    min-height: 100vh;
+    width: 100%;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    display: flex;
+    flex-direction: column;
+    color: #f8fafc;
+    position: relative;
+    overflow-x: hidden;
+}
+
+.onboarding-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 24px 48px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(12px);
+    background: rgba(15, 23, 42, 0.6);
+}
+
+.onboarding-brand {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.onboarding-progress-pills {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.progress-step-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.825rem;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.05);
+    color: #94a3b8;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.progress-step-pill.active {
+    background: rgba(37, 99, 235, 0.2);
+    color: #60a5fa;
+    border-color: rgba(96, 165, 250, 0.4);
+}
+
+.progress-step-pill.completed {
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border-color: rgba(52, 211, 153, 0.3);
+}
+
+.onboarding-body {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 40px 20px;
+}
+
+.onboarding-card {
+    background: #ffffff;
+    color: #0f172a;
+    border-radius: 20px;
+    padding: 40px;
+    max-width: 640px;
+    width: 100%;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.institution-item:hover {
+    background-color: #eff6ff !important;
+    color: #2563eb !important;
 }
 
 @media (max-width: 768px) {
@@ -82,4 +201,11 @@
     .login-right-side {
         display: none;
     }
+    .onboarding-header {
+        padding: 16px 20px;
+    }
+    .onboarding-card {
+        padding: 24px;
+    }
 }
+

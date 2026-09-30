@@ -20,74 +20,91 @@ export class AppService {
     }
 
     const email = userData.email.trim();
-    const existing = await this.prisma.user.findUnique({
-      where: { email },
-    });
 
-    if (existing) {
-      return this.prisma.user.update({
-        where: { id: existing.id },
+    try {
+      const existing = await this.prisma.user.findUnique({
+        where: { email },
+      });
+
+      // Resolve supervisor_id if supervisor_email or supervisor_id is provided
+      let supervisorId: number | null = userData.supervisor_id ? Number(userData.supervisor_id) : null;
+      if (!supervisorId && userData.supervisor_email) {
+        const sup = await this.prisma.user.findUnique({
+          where: { email: userData.supervisor_email.trim() },
+        });
+        if (sup) {
+          supervisorId = sup.id;
+        }
+      }
+
+      if (existing) {
+        return await this.prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            full_name: userData.full_name || existing.full_name,
+            role: userData.role || existing.role,
+            student_id: userData.student_id ?? existing.student_id,
+            course: userData.course ?? existing.course,
+            level: userData.level ?? existing.level,
+            department: userData.department ?? existing.department,
+            institution: userData.institution ?? existing.institution,
+            gender: userData.gender ?? existing.gender,
+            title: userData.title ?? existing.title,
+            office_loc: userData.office_loc ?? existing.office_loc,
+            supervisor_id: supervisorId ?? existing.supervisor_id,
+          },
+        });
+      }
+
+      return await this.prisma.user.create({
         data: {
-          full_name: userData.full_name || existing.full_name,
-          role: userData.role || existing.role,
-          student_id: userData.student_id ?? existing.student_id,
-          course: userData.course ?? existing.course,
-          level: userData.level ?? existing.level,
-          department: userData.department ?? existing.department,
-          institution: userData.institution ?? existing.institution,
-          gender: userData.gender ?? existing.gender,
-          title: userData.title ?? existing.title,
-          office_loc: userData.office_loc ?? existing.office_loc,
+          email,
+          password: userData.password || 'managed_by_supabase',
+          full_name: userData.full_name || email.split('@')[0],
+          role: userData.role || 'student',
+          student_id: userData.student_id || null,
+          course: userData.course || null,
+          level: userData.level || null,
+          department: userData.department || null,
+          institution: userData.institution || null,
+          gender: userData.gender || null,
+          title: userData.title || null,
+          office_loc: userData.office_loc || null,
+          supervisor_id: supervisorId,
         },
       });
+    } catch (error: any) {
+      console.error('Failed to sync user to Database:', error);
+      throw new BadRequestException(`Database Save Error: ${error.message || 'Unable to persist user to database'}`);
     }
-
-    return this.prisma.user.create({
-      data: {
-        email,
-        password: userData.password || 'managed_by_supabase',
-        full_name: userData.full_name || email.split('@')[0],
-        role: userData.role || 'student',
-        student_id: userData.student_id || null,
-        course: userData.course || null,
-        level: userData.level || null,
-        department: userData.department || null,
-        institution: userData.institution || null,
-        gender: userData.gender || null,
-        title: userData.title || null,
-        office_loc: userData.office_loc || null,
-      },
-    });
   }
 
   async registerUser(body: any) {
-    const { email, password, full_name, role, ...metadata } = body;
-    const client = this.supabaseService.getClient();
-
-    // 1. Sign up on Supabase Auth
-    const { data: authData, error } = await client.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name, role, ...metadata },
-      },
-    });
-
-    if (error) {
-      throw new BadRequestException(error.message);
+    if (!body || !body.email) {
+      throw new BadRequestException('Email is required for account registration');
     }
 
-    // 2. Persist / Sync directly into database via Prisma
-    const syncedUser = await this.syncUser({
-      email,
-      password,
-      full_name,
-      role,
-      ...metadata,
-    });
+    // 1. Save directly into PostgreSQL database via Prisma
+    const syncedUser = await this.syncUser(body);
+
+    // 2. Register on Supabase Auth (optional background sync)
+    try {
+      const client = this.supabaseService.getClient();
+      if (client && body.password) {
+        await client.auth.signUp({
+          email: body.email.trim(),
+          password: body.password,
+          options: {
+            data: body,
+          },
+        });
+      }
+    } catch (err: any) {
+      console.warn('Supabase Auth optional warning:', err.message);
+    }
 
     return {
-      session: authData.session,
+      message: 'Account created and saved to database successfully',
       user: syncedUser,
     };
   }

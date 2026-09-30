@@ -1,13 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import coverImg from '../assets/login_cover.png';
+import institutionList from '../data/institutions.json';
 import './Login.css';
 
-type Step = 'AUTH' | 'ROLE_SELECT' | 'STUDENT_SUPERVISOR_SEARCH' | 'STUDENT_DETAILS' | 'SUPERVISOR_DETAILS';
-
 interface Supervisor {
-    id: string;
+    id: string | number;
     full_name?: string;
     name?: string;
     email: string;
@@ -15,52 +14,133 @@ interface Supervisor {
     institution?: string;
 }
 
+const POPULAR_DEPARTMENTS = [
+    'Computer Science',
+    'Electrical & Electronics Engineering',
+    'Mechanical Engineering',
+    'Petroleum Engineering',
+    'Civil Engineering',
+    'Chemical Engineering',
+    'Accounting & Finance',
+    'Business Administration',
+    'Mass Communication',
+    'Economics',
+    'Microbiology & Biotechnology',
+    'Biochemistry',
+    'Architecture',
+    'Law',
+    'Medicine & Surgery',
+    'Nursing Science',
+    'Mathematics & Statistics',
+    'Physics & Geophysics',
+    'Chemistry & Industrial Chemistry',
+    'Political Science & Public Administration',
+    'Other (Specify Custom Department)',
+];
+
 export const Login: React.FC = () => {
     const [mode, setMode] = useState<'LOGIN' | 'SIGNUP'>('LOGIN');
-    const [step, setStep] = useState<Step>('AUTH');
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
 
-    // Form fields
+    // Account Credentials
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [fullName, setFullName] = useState('');
+    
+    // Default Role is 'student' as requested
     const [role, setRole] = useState<'student' | 'supervisor'>('student');
 
-    // Student fields
+    // Student specific fields
     const [studentId, setStudentId] = useState('');
     const [course, setCourse] = useState('');
     const [level, setLevel] = useState('400');
-    const [department, setDepartment] = useState('');
-    const [institution, setInstitution] = useState('');
     const [gender, setGender] = useState('Male');
 
-    // Supervisor Search fields
-    const [searchQuery, setSearchQuery] = useState('');
+    // Department selection state (with custom fallback)
+    const [selectedDept, setSelectedDept] = useState('Computer Science');
+    const [customDept, setCustomDept] = useState('');
+
+    // Institution selection state (Searchable from Excel list + custom option)
+    const [institutionSearch, setInstitutionSearch] = useState('Federal University of Petroleum Resources Effurun');
+    const [customInst, setCustomInst] = useState('');
+    const [showInstDropdown, setShowInstDropdown] = useState(false);
+
+    // Supervisor Search & Selection
     const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
-    const [searching, setSearching] = useState(false);
     const [selectedSupervisor, setSelectedSupervisor] = useState<Supervisor | null>(null);
 
-    // Supervisor fields
+    // Supervisor specific fields
     const [title, setTitle] = useState('Dr.');
     const [officeLoc, setOfficeLoc] = useState('');
 
+    // Filter institutions from Excel data based on search input
+    const filteredInstitutions = useMemo(() => {
+        if (!institutionSearch.trim()) return institutionList.slice(0, 30);
+        const query = institutionSearch.toLowerCase();
+        const matches = institutionList.filter((inst: string) => inst.toLowerCase().includes(query));
+        return matches.length > 0 ? matches.slice(0, 30) : [];
+    }, [institutionSearch]);
+
+    // Fetch supervisors from backend API
+    useEffect(() => {
+        const fetchSupervisors = async () => {
+            try {
+                const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+                const res = await fetch(`${backendUrl}/api/supervisors`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.length > 0) {
+                        setSupervisors(data);
+                        return;
+                    }
+                }
+            } catch (err) {
+                console.warn('Backend supervisor fetch error, using fallbacks');
+            }
+            // Default fallback supervisors
+            setSupervisors([
+                { id: '1', full_name: 'Dr. O. A. Bode', email: 'bode@fupre.edu.ng', department: 'Computer Science', institution: 'FUPRE' },
+                { id: '2', full_name: 'Prof. E. K. Akpata', email: 'akpata@fupre.edu.ng', department: 'Electrical Eng', institution: 'FUPRE' },
+                { id: '3', full_name: 'Dr. Mrs. N. Nwosu', email: 'nwosu@fupre.edu.ng', department: 'Computer Science', institution: 'FUPRE' },
+            ]);
+        };
+        fetchSupervisors();
+    }, []);
+
+    // Get final department string
+    const getFinalDepartment = () => {
+        if (selectedDept === 'Other (Specify Custom Department)') {
+            return customDept.trim() || 'General';
+        }
+        return selectedDept;
+    };
+
+    // Get final institution string
+    const getFinalInstitution = () => {
+        if (institutionSearch === 'Other (Specify Custom Institution)') {
+            return customInst.trim() || 'FUPRE';
+        }
+        return institutionSearch.trim() || 'Federal University of Petroleum Resources Effurun';
+    };
+
+    // 1. LOGIN HANDLER
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         try {
-            // First authenticate with Supabase Auth
             const { data, error } = await supabase.auth.signInWithPassword({
                 email: email.trim(),
                 password: password,
             });
 
-            if (error) throw error;
+            if (error) throw new Error(`Auth Failed: ${error.message}`);
 
             const userRole = data.user?.user_metadata?.role || (email.includes('supervisor') ? 'supervisor' : 'student');
 
-            // Sync user profile to PostgreSQL DB via backend API
-            await fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'}/api/auth/sync-user`, {
+            const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+            const syncRes = await fetch(`${backendUrl}/api/auth/sync-user`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -69,9 +149,20 @@ export const Login: React.FC = () => {
                     role: userRole,
                     ...data.user.user_metadata,
                 }),
-            }).catch(console.error);
+            });
 
-            if (userRole === 'supervisor') {
+            if (!syncRes.ok) {
+                const errJson = await syncRes.json().catch(() => ({}));
+                throw new Error(`Database Error: ${errJson.message || 'Failed to sync user record with database.'}`);
+            }
+
+            const syncedUser = await syncRes.json();
+
+            localStorage.setItem('user_role', syncedUser.role || userRole);
+            localStorage.setItem('user_email', data.user.email || '');
+            localStorage.setItem('user_name', syncedUser.full_name || '');
+
+            if ((syncedUser.role || userRole) === 'supervisor') {
                 navigate('/supervisor/dashboard');
             } else {
                 navigate('/student/dashboard');
@@ -83,118 +174,65 @@ export const Login: React.FC = () => {
         }
     };
 
-    const handleInitialSignup = (e: React.FormEvent) => {
+    // 2. UNIFIED REAL-TIME SIGNUP HANDLER
+    const handleSingleFormSignup = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!email || !password || !fullName) {
-            alert('Please fill out all required fields');
+            alert('Please fill out all required credentials (name, email, password)');
             return;
         }
-        setStep('ROLE_SELECT');
-    };
 
-    const handleRoleChoice = (chosenRole: 'student' | 'supervisor') => {
-        setRole(chosenRole);
-        if (chosenRole === 'student') {
-            setStep('STUDENT_SUPERVISOR_SEARCH');
-        } else {
-            setStep('SUPERVISOR_DETAILS');
-        }
-    };
-
-    // Flexible Search for Supervisors calling Backend API
-    const handleSearchSupervisors = async () => {
-        setSearching(true);
-        try {
-            const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-            const res = await fetch(`${backendUrl}/api/supervisors?query=${encodeURIComponent(searchQuery.trim())}`);
-            if (res.ok) {
-                const data = await res.json();
-                if (data && data.length > 0) {
-                    setSupervisors(data);
-                    return;
-                }
-            }
-
-            // Fallback search via Supabase if backend returns empty
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('role', 'supervisor');
-
-            if (!error && data) {
-                const queryClean = searchQuery.trim().toLowerCase();
-                const filtered = data.filter((sup: any) => {
-                    const sName = (sup.full_name || sup.name || sup.email || '').toLowerCase();
-                    if (!queryClean) return true;
-                    const tokens = queryClean.split(/\s+/);
-                    return tokens.every(token => sName.includes(token));
-                });
-                setSupervisors(filtered);
-            }
-        } catch (err: any) {
-            console.error('Search error:', err.message);
-            setSupervisors([
-                { id: '1', full_name: 'Dr. O. A. Bode', email: 'bode@fupre.edu.ng', department: 'Computer Science', institution: 'FUPRE' },
-                { id: '2', full_name: 'Prof. E. K. Akpata', email: 'akpata@fupre.edu.ng', department: 'Electrical Eng', institution: 'FUPRE' },
-                { id: '3', full_name: 'Dr. Mrs. N. Nwosu', email: 'nwosu@fupre.edu.ng', department: 'Computer Science', institution: 'FUPRE' },
-            ].filter(sup => {
-                const sName = sup.full_name.toLowerCase();
-                const tokens = searchQuery.trim().toLowerCase().split(/\s+/);
-                return tokens.every(token => sName.includes(token));
-            }));
-        } finally {
-            setSearching(false);
-        }
-    };
-
-    const handleFinalSignup = async () => {
         setLoading(true);
         try {
-            const metadata = {
-                full_name: fullName,
+            const finalDept = getFinalDepartment();
+            const finalInst = getFinalInstitution();
+
+            const payload = {
+                email: email.trim(),
+                password: password,
+                full_name: fullName.trim(),
                 role: role,
+                department: finalDept,
+                institution: finalInst,
                 ...(role === 'student' ? {
-                    student_id: studentId,
-                    course,
+                    student_id: studentId.trim(),
+                    course: course.trim() || finalDept,
                     level,
-                    department,
-                    institution,
                     gender,
                     supervisor_email: selectedSupervisor?.email || '',
                     supervisor_name: selectedSupervisor?.full_name || selectedSupervisor?.name || '',
+                    supervisor_id: selectedSupervisor?.id ? Number(selectedSupervisor.id) : null,
                 } : {
                     title,
-                    office_loc: officeLoc,
-                    department,
-                    institution,
+                    office_loc: officeLoc.trim(),
                 })
             };
 
-            // Sign up on Supabase Auth
-            const { error } = await supabase.auth.signUp({
-                email: email.trim(),
-                password: password,
-                options: {
-                    data: metadata
-                }
-            });
-
-            if (error) throw error;
-
-            // Direct sync to Database via NestJS backend (replicating atlas-dev pattern)
             const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-            await fetch(`${backendUrl}/api/auth/sync-user`, {
+            const registerRes = await fetch(`${backendUrl}/api/auth/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email: email.trim(),
-                    password: password,
-                    ...metadata,
-                }),
+                body: JSON.stringify(payload),
             });
 
-            alert("Account created successfully! Saved to Database & Auth provider.");
-            if (role === 'supervisor') {
+            if (!registerRes.ok) {
+                const errData = await registerRes.json().catch(() => ({}));
+                throw new Error(errData.message || 'Could not save profile to database.');
+            }
+
+            const resData = await registerRes.json();
+            const dbUser = resData.user || resData;
+
+            if (!dbUser || !dbUser.id) {
+                throw new Error('Database Error: User record was not persisted.');
+            }
+
+            localStorage.setItem('user_role', dbUser.role || role);
+            localStorage.setItem('user_email', email.trim());
+            localStorage.setItem('user_name', fullName.trim());
+
+            alert("Account created successfully and saved to Database!");
+            if ((dbUser.role || role) === 'supervisor') {
                 navigate('/supervisor/dashboard');
             } else {
                 navigate('/student/dashboard');
@@ -208,55 +246,55 @@ export const Login: React.FC = () => {
 
     return (
         <div className="login-container">
-            {/* Left side - Dynamic Auth Flow */}
+            {/* Left side - Dynamic Auth Form Container */}
             <div className="login-left-side">
-                <div style={{ maxWidth: '440px', width: '100%', margin: '0 auto' }}>
+                <div style={{ maxWidth: '480px', width: '100%', margin: '0 auto' }}>
                     <h2 style={{ color: 'var(--primary-slate)', fontWeight: 800, marginBottom: '5px', fontSize: '2rem', letterSpacing: '-0.03em' }}>
                         SIWES Portal
                     </h2>
-                    <p style={{ color: '#6b7280', fontSize: '0.95rem', marginBottom: '25px', fontWeight: 500 }}>
-                        {mode === 'LOGIN' ? 'Sign in to manage your logbook records' : 'Create an account to join the portal'}
+                    <p style={{ color: '#6b7280', fontSize: '0.95rem', marginBottom: '20px', fontWeight: 500 }}>
+                        {mode === 'LOGIN' ? 'Sign in to manage your logbook records' : 'Create your account on the SIWES portal'}
                     </p>
 
                     {/* Navigation Tabs between Login and Signup */}
-                    {step === 'AUTH' && (
-                        <div style={{ display: 'flex', gap: '10px', marginBottom: '25px', background: '#f3f4f6', padding: '4px', borderRadius: '8px' }}>
-                            <button 
-                                onClick={() => setMode('LOGIN')}
-                                style={{
-                                    flex: 1,
-                                    padding: '8px',
-                                    border: 'none',
-                                    borderRadius: '6px',
-                                    background: mode === 'LOGIN' ? '#ffffff' : 'transparent',
-                                    fontWeight: 700,
-                                    color: mode === 'LOGIN' ? '#0f172a' : '#64748b',
-                                    boxShadow: mode === 'LOGIN' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                Sign In
-                            </button>
-                            <button 
-                                onClick={() => setMode('SIGNUP')}
-                                style={{
-                                    flex: 1,
-                                    padding: '8px',
-                                    border: 'none',
-                                    borderRadius: '6px',
-                                    background: mode === 'SIGNUP' ? '#ffffff' : 'transparent',
-                                    fontWeight: 700,
-                                    color: mode === 'SIGNUP' ? '#0f172a' : '#64748b',
-                                    boxShadow: mode === 'SIGNUP' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                Create Account
-                            </button>
-                        </div>
-                    )}
+                    <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', background: '#f3f4f6', padding: '4px', borderRadius: '8px' }}>
+                        <button 
+                            type="button"
+                            onClick={() => setMode('LOGIN')}
+                            style={{
+                                flex: 1,
+                                padding: '8px',
+                                border: 'none',
+                                borderRadius: '6px',
+                                background: mode === 'LOGIN' ? '#ffffff' : 'transparent',
+                                fontWeight: 700,
+                                color: mode === 'LOGIN' ? '#0f172a' : '#64748b',
+                                boxShadow: mode === 'LOGIN' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Sign In
+                        </button>
+                        <button 
+                            type="button"
+                            onClick={() => setMode('SIGNUP')}
+                            style={{
+                                flex: 1,
+                                padding: '8px',
+                                border: 'none',
+                                borderRadius: '6px',
+                                background: mode === 'SIGNUP' ? '#ffffff' : 'transparent',
+                                fontWeight: 700,
+                                color: mode === 'SIGNUP' ? '#0f172a' : '#64748b',
+                                boxShadow: mode === 'SIGNUP' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Create Account
+                        </button>
+                    </div>
 
-                    {/* LOGIN FORM */}
+                    {/* MODE 1: LOGIN FORM */}
                     {mode === 'LOGIN' && (
                         <form onSubmit={handleLogin}>
                             <div className="form-group">
@@ -271,13 +309,49 @@ export const Login: React.FC = () => {
                             </div>
                             <div className="form-group">
                                 <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Password</label>
-                                <input 
-                                    type="password" 
-                                    value={password} 
-                                    onChange={(e) => setPassword(e.target.value)} 
-                                    required 
-                                    placeholder="••••••••"
-                                />
+                                <div style={{ position: 'relative', width: '100%' }}>
+                                    <input 
+                                        type={showPassword ? "text" : "password"} 
+                                        value={password} 
+                                        onChange={(e) => setPassword(e.target.value)} 
+                                        required 
+                                        placeholder="••••••••"
+                                        style={{ paddingRight: '40px', width: '100%' }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        style={{
+                                            position: 'absolute',
+                                            right: '12px',
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            background: 'none',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            color: '#64748b',
+                                            padding: '4px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                        title={showPassword ? "Hide password" : "Show password"}
+                                    >
+                                        {showPassword ? (
+                                            /* Eye Slash Icon (Hide) */
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                                <line x1="1" y1="1" x2="23" y2="23"></line>
+                                            </svg>
+                                        ) : (
+                                            /* Eye Open Icon (Show) */
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                                <circle cx="12" cy="12" r="3"></circle>
+                                            </svg>
+                                        )}
+                                    </button>
+                                </div>
                             </div>
                             <button 
                                 type="submit" 
@@ -285,14 +359,58 @@ export const Login: React.FC = () => {
                                 disabled={loading}
                                 style={{ width: '100%', marginTop: '15px', padding: '14px' }}
                             >
-                                {loading ? 'Signing In...' : 'Sign In'}
+                                {loading ? 'Signing In & Verifying DB...' : 'Sign In'}
                             </button>
                         </form>
                     )}
 
-                    {/* SIGNUP STEP 1: Basic Information */}
-                    {mode === 'SIGNUP' && step === 'AUTH' && (
-                        <form onSubmit={handleInitialSignup}>
+                    {/* MODE 2: REAL-TIME SINGLE SIGNUP FORM */}
+                    {mode === 'SIGNUP' && (
+                        <form onSubmit={handleSingleFormSignup} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                            {/* REAL-TIME ROLE TOGGLE (Default is Student) */}
+                            <div>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                                    I am registering as:
+                                </label>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                    <div 
+                                        onClick={() => setRole('student')}
+                                        className={`role-card ${role === 'student' ? 'selected' : ''}`}
+                                        style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px', textAlign: 'left' }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: role === 'student' ? '#2563eb' : '#64748b' }}>
+                                            {/* Academic / Student Cap Icon */}
+                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
+                                                <path d="M6 12v5c3 3 9 3 12 0v-5"></path>
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#0f172a' }}>Student</div>
+                                            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Log daily entries</div>
+                                        </div>
+                                    </div>
+                                    <div 
+                                        onClick={() => setRole('supervisor')}
+                                        className={`role-card ${role === 'supervisor' ? 'selected' : ''}`}
+                                        style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px', textAlign: 'left' }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: role === 'supervisor' ? '#2563eb' : '#64748b' }}>
+                                            {/* User / Teacher Badge Icon */}
+                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                                <circle cx="12" cy="7" r="4"></circle>
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#0f172a' }}>Supervisor</div>
+                                            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Oversee logbooks</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* CREDENTIALS */}
                             <div className="form-group">
                                 <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Full Name</label>
                                 <input 
@@ -300,7 +418,7 @@ export const Login: React.FC = () => {
                                     value={fullName} 
                                     onChange={(e) => setFullName(e.target.value)} 
                                     required 
-                                    placeholder="e.g. Richmond Alex"
+                                    placeholder="John Doe"
                                 />
                             </div>
                             <div className="form-group">
@@ -315,263 +433,254 @@ export const Login: React.FC = () => {
                             </div>
                             <div className="form-group">
                                 <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Password</label>
-                                <input 
-                                    type="password" 
-                                    value={password} 
-                                    onChange={(e) => setPassword(e.target.value)} 
-                                    required 
-                                    placeholder="••••••••"
-                                />
-                            </div>
-                            <button 
-                                type="submit" 
-                                className="btn btn-primary" 
-                                style={{ width: '100%', marginTop: '15px', padding: '14px' }}
-                            >
-                                Continue &rarr;
-                            </button>
-                        </form>
-                    )}
-
-                    {/* SIGNUP STEP 2: Role Selection */}
-                    {mode === 'SIGNUP' && step === 'ROLE_SELECT' && (
-                        <div>
-                            <p style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: '15px', color: '#1e293b' }}>
-                                Are you a Student or a Supervisor?
-                            </p>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
-                                <div 
-                                    onClick={() => handleRoleChoice('student')}
-                                    style={{
-                                        border: '2px solid #e2e8f0',
-                                        borderRadius: '12px',
-                                        padding: '20px 15px',
-                                        textAlign: 'center',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.2s',
-                                        backgroundColor: '#f8fafc'
-                                    }}
-                                    className="role-card"
-                                >
-                                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🎓</div>
-                                    <h4 style={{ margin: 0, fontWeight: 700 }}>Student</h4>
-                                    <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px' }}>Document daily SIWES work & link supervisor</p>
-                                </div>
-                                <div 
-                                    onClick={() => handleRoleChoice('supervisor')}
-                                    style={{
-                                        border: '2px solid #e2e8f0',
-                                        borderRadius: '12px',
-                                        padding: '20px 15px',
-                                        textAlign: 'center',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.2s',
-                                        backgroundColor: '#f8fafc'
-                                    }}
-                                    className="role-card"
-                                >
-                                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>👨‍🏫</div>
-                                    <h4 style={{ margin: 0, fontWeight: 700 }}>Supervisor</h4>
-                                    <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px' }}>Oversee student logbooks & broadcast updates</p>
+                                <div style={{ position: 'relative', width: '100%' }}>
+                                    <input 
+                                        type={showPassword ? "text" : "password"} 
+                                        value={password} 
+                                        onChange={(e) => setPassword(e.target.value)} 
+                                        required 
+                                        placeholder="••••••••"
+                                        style={{ paddingRight: '40px', width: '100%' }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        style={{
+                                            position: 'absolute',
+                                            right: '12px',
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            background: 'none',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            color: '#64748b',
+                                            padding: '4px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                        title={showPassword ? "Hide password" : "Show password"}
+                                    >
+                                        {showPassword ? (
+                                            /* Eye Slash Icon (Hide) */
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                                <line x1="1" y1="1" x2="23" y2="23"></line>
+                                            </svg>
+                                        ) : (
+                                            /* Eye Open Icon (Show) */
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                                <circle cx="12" cy="12" r="3"></circle>
+                                            </svg>
+                                        )}
+                                    </button>
                                 </div>
                             </div>
-                            <button 
-                                onClick={() => setStep('AUTH')} 
-                                className="btn"
-                                style={{ width: '100%', background: '#e2e8f0', color: '#334155' }}
-                            >
-                                &larr; Back
-                            </button>
-                        </div>
-                    )}
 
-                    {/* SIGNUP STEP 3: Student Supervisor Search */}
-                    {mode === 'SIGNUP' && step === 'STUDENT_SUPERVISOR_SEARCH' && (
-                        <div>
-                            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '5px' }}>
-                                Find & Link Your Supervisor
-                            </h3>
-                            <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '15px' }}>
-                                Search by your supervisor's name (partial matches supported):
-                            </p>
-
-                            <div style={{ display: 'flex', gap: '8px', marginBottom: '15px' }}>
-                                <input 
-                                    type="text"
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    placeholder="Search supervisor name (e.g. Bode, Akpata...)"
-                                    style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}
-                                />
-                                <button 
-                                    type="button"
-                                    onClick={handleSearchSupervisors}
-                                    className="btn btn-primary"
-                                    style={{ padding: '10px 16px' }}
+                            {/* SEARCHABLE / DROPDOWN DEPARTMENT */}
+                            <div className="form-group">
+                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Department</label>
+                                <select 
+                                    value={selectedDept}
+                                    onChange={(e) => setSelectedDept(e.target.value)}
+                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
                                 >
-                                    {searching ? '...' : 'Search'}
-                                </button>
-                            </div>
+                                    {POPULAR_DEPARTMENTS.map(dept => (
+                                        <option key={dept} value={dept}>{dept}</option>
+                                    ))}
+                                </select>
 
-                            {/* Supervisor list */}
-                            <div style={{ maxHeight: '180px', overflowY: 'auto', marginBottom: '15px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                {supervisors.length > 0 ? (
-                                    supervisors.map(sup => (
-                                        <div 
-                                            key={sup.id}
-                                            onClick={() => setSelectedSupervisor(sup)}
-                                            style={{
-                                                padding: '10px 12px',
-                                                border: selectedSupervisor?.id === sup.id ? '2px solid var(--primary-slate)' : '1px solid #e2e8f0',
-                                                borderRadius: '8px',
-                                                background: selectedSupervisor?.id === sup.id ? '#f1f5f9' : '#ffffff',
-                                                cursor: 'pointer',
-                                                display: 'flex',
-                                                justifyContent: 'space-between',
-                                                alignItems: 'center'
-                                            }}
-                                        >
-                                            <div>
-                                                <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{sup.full_name || sup.name || sup.email}</div>
-                                                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{sup.department || 'Academic Staff'} ({sup.email})</div>
-                                            </div>
-                                            {selectedSupervisor?.id === sup.id && <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓ Selected</span>}
-                                        </div>
-                                    ))
-                                ) : (
-                                    <p style={{ fontSize: '0.8rem', color: '#94a3b8', fontStyle: 'italic', textAlign: 'center' }}>
-                                        Type a name and click search to view matching supervisors
-                                    </p>
+                                {/* Custom department text field if "Other" is selected */}
+                                {selectedDept === 'Other (Specify Custom Department)' && (
+                                    <input 
+                                        type="text"
+                                        value={customDept}
+                                        onChange={(e) => setCustomDept(e.target.value)}
+                                        placeholder="Type custom department name..."
+                                        style={{ marginTop: '8px' }}
+                                        required
+                                    />
                                 )}
                             </div>
 
-                            <div style={{ display: 'flex', gap: '10px' }}>
-                                <button 
-                                    type="button" 
-                                    onClick={() => setStep('ROLE_SELECT')} 
-                                    className="btn"
-                                    style={{ flex: 1, background: '#e2e8f0', color: '#334155' }}
-                                >
-                                    &larr; Back
-                                </button>
-                                <button 
-                                    type="button" 
-                                    onClick={() => setStep('STUDENT_DETAILS')} 
-                                    disabled={!selectedSupervisor}
-                                    className="btn btn-primary"
-                                    style={{ flex: 1 }}
-                                >
-                                    Next: Academic Info &rarr;
-                                </button>
-                            </div>
-                        </div>
-                    )}
+                            {/* SEARCHABLE INSTITUTION DROPDOWN (Loaded from Nigerian Universities & Polytechnics Excel file) */}
+                            <div className="form-group" style={{ position: 'relative' }}>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Institution / University / Polytechnic</label>
+                                <input 
+                                    type="text" 
+                                    value={institutionSearch}
+                                    onChange={(e) => {
+                                        setInstitutionSearch(e.target.value);
+                                        setShowInstDropdown(true);
+                                    }}
+                                    onFocus={() => setShowInstDropdown(true)}
+                                    placeholder="Type or search university/polytechnic..."
+                                    required
+                                />
 
-                    {/* SIGNUP STEP 4: Student Academic Details */}
-                    {mode === 'SIGNUP' && step === 'STUDENT_DETAILS' && (
-                        <div>
-                            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '15px' }}>
-                                Complete Student Profile
-                            </h3>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Matric / Student ID</label>
-                                <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="e.g. CPN/2020/1042" required />
-                            </div>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Course of Study</label>
-                                <input type="text" value={course} onChange={(e) => setCourse(e.target.value)} placeholder="Computer Science" required />
-                            </div>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Level</label>
-                                <select value={level} onChange={(e) => setLevel(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                                    <option value="300">300 Level</option>
-                                    <option value="400">400 Level</option>
-                                    <option value="500">500 Level</option>
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Gender</label>
-                                <select value={gender} onChange={(e) => setGender(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                                    <option value="Male">Male</option>
-                                    <option value="Female">Female</option>
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Department</label>
-                                <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="Maths & Computer Science" required />
-                            </div>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Institution</label>
-                                <input type="text" value={institution} onChange={(e) => setInstitution(e.target.value)} placeholder="FUPRE" required />
-                            </div>
+                                {/* Search dropdown list from Excel */}
+                                {showInstDropdown && (
+                                    <div 
+                                        style={{
+                                            position: 'absolute',
+                                            top: '100%',
+                                            left: 0,
+                                            right: 0,
+                                            maxHeight: '180px',
+                                            overflowY: 'auto',
+                                            background: '#ffffff',
+                                            border: '1px solid #cbd5e1',
+                                            borderRadius: '8px',
+                                            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+                                            zIndex: 10,
+                                            marginTop: '4px'
+                                        }}
+                                    >
+                                        {filteredInstitutions.length > 0 ? (
+                                            filteredInstitutions.map((inst: string, idx: number) => (
+                                                <div 
+                                                    key={idx}
+                                                    onClick={() => {
+                                                        setInstitutionSearch(inst);
+                                                        setShowInstDropdown(false);
+                                                    }}
+                                                    style={{
+                                                        padding: '10px 12px',
+                                                        fontSize: '0.825rem',
+                                                        cursor: 'pointer',
+                                                        borderBottom: '1px solid #f1f5f9',
+                                                        color: '#1e293b',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '8px'
+                                                    }}
+                                                    className="institution-item"
+                                                >
+                                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#64748b' }}>
+                                                        <path d="M3 21h18M3 7l9-4 9 4M4 10h16M6 10v8M10 10v8M14 10v8M18 10v8"></path>
+                                                    </svg>
+                                                    {inst}
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div 
+                                                onClick={() => {
+                                                    setInstitutionSearch('Other (Specify Custom Institution)');
+                                                    setShowInstDropdown(false);
+                                                }}
+                                                style={{ padding: '10px 12px', fontSize: '0.825rem', color: '#2563eb', cursor: 'pointer', fontWeight: 'bold' }}
+                                            >
+                                                + Other (Specify custom institution)
+                                            </div>
+                                        )}
+                                        <div 
+                                            onClick={() => {
+                                                setInstitutionSearch('Other (Specify Custom Institution)');
+                                                setShowInstDropdown(false);
+                                            }}
+                                            style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#2563eb', background: '#eff6ff', cursor: 'pointer', textAlign: 'center', fontWeight: 'bold' }}
+                                        >
+                                            Can't find yours? Click here to type custom institution
+                                        </div>
+                                    </div>
+                                )}
 
-                            <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-                                <button 
-                                    type="button" 
-                                    onClick={() => setStep('STUDENT_SUPERVISOR_SEARCH')} 
-                                    className="btn"
-                                    style={{ flex: 1, background: '#e2e8f0', color: '#334155' }}
-                                >
-                                    &larr; Back
-                                </button>
-                                <button 
-                                    type="button" 
-                                    onClick={handleFinalSignup} 
-                                    disabled={loading}
-                                    className="btn btn-primary"
-                                    style={{ flex: 1 }}
-                                >
-                                    {loading ? 'Creating...' : 'Finish & Sign Up'}
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* SIGNUP STEP 5: Supervisor Details */}
-                    {mode === 'SIGNUP' && step === 'SUPERVISOR_DETAILS' && (
-                        <div>
-                            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '15px' }}>
-                                Complete Supervisor Profile
-                            </h3>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Title</label>
-                                <select value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                                    <option value="Dr.">Dr.</option>
-                                    <option value="Prof.">Prof.</option>
-                                    <option value="Mr.">Mr.</option>
-                                    <option value="Mrs.">Mrs.</option>
-                                    <option value="Engr.">Engr.</option>
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Department</label>
-                                <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="Computer Science" required />
-                            </div>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Office / Building Location</label>
-                                <input type="text" value={officeLoc} onChange={(e) => setOfficeLoc(e.target.value)} placeholder="Block B, Room 204" required />
+                                {/* Custom institution text field if "Other" is selected */}
+                                {institutionSearch === 'Other (Specify Custom Institution)' && (
+                                    <input 
+                                        type="text"
+                                        value={customInst}
+                                        onChange={(e) => setCustomInst(e.target.value)}
+                                        placeholder="Type custom institution name..."
+                                        style={{ marginTop: '8px' }}
+                                        required
+                                    />
+                                )}
                             </div>
 
-                            <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-                                <button 
-                                    type="button" 
-                                    onClick={() => setStep('ROLE_SELECT')} 
-                                    className="btn"
-                                    style={{ flex: 1, background: '#e2e8f0', color: '#334155' }}
-                                >
-                                    &larr; Back
-                                </button>
-                                <button 
-                                    type="button" 
-                                    onClick={handleFinalSignup} 
-                                    disabled={loading}
-                                    className="btn btn-primary"
-                                    style={{ flex: 1 }}
-                                >
-                                    {loading ? 'Creating...' : 'Finish & Sign Up'}
-                                </button>
-                            </div>
-                        </div>
+                            {/* REAL-TIME ROLE-SPECIFIC FIELDS */}
+                            {role === 'student' ? (
+                                /* STUDENT REAL-TIME FIELDS */
+                                <>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                        <div className="form-group">
+                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Matric / Student ID</label>
+                                            <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="CPN/2020/1042" required />
+                                        </div>
+                                        <div className="form-group">
+                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Course of Study</label>
+                                            <input type="text" value={course} onChange={(e) => setCourse(e.target.value)} placeholder="e.g. Software Engineering" required />
+                                        </div>
+                                    </div>
+
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                        <div className="form-group">
+                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Level</label>
+                                            <select value={level} onChange={(e) => setLevel(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                                                <option value="300">300 Level</option>
+                                                <option value="400">400 Level</option>
+                                                <option value="500">500 Level</option>
+                                            </select>
+                                        </div>
+                                        <div className="form-group">
+                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Gender</label>
+                                            <select value={gender} onChange={(e) => setGender(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                                                <option value="Male">Male</option>
+                                                <option value="Female">Female</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Assigned Academic Supervisor</label>
+                                        <select 
+                                            onChange={(e) => {
+                                                const selected = supervisors.find(s => String(s.id) === e.target.value || s.email === e.target.value);
+                                                setSelectedSupervisor(selected || null);
+                                            }}
+                                            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                                        >
+                                            <option value="">Select a Supervisor...</option>
+                                            {supervisors.map(sup => (
+                                                <option key={sup.id} value={sup.email}>
+                                                    {sup.full_name || sup.name || sup.email} ({sup.department || 'Staff'})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </>
+                            ) : (
+                                /* SUPERVISOR REAL-TIME FIELDS */
+                                <>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                        <div className="form-group">
+                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Title</label>
+                                            <select value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                                                <option value="Dr.">Dr.</option>
+                                                <option value="Prof.">Prof.</option>
+                                                <option value="Mr.">Mr.</option>
+                                                <option value="Mrs.">Mrs.</option>
+                                                <option value="Engr.">Engr.</option>
+                                            </select>
+                                        </div>
+                                        <div className="form-group">
+                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Office / Building Location</label>
+                                            <input type="text" value={officeLoc} onChange={(e) => setOfficeLoc(e.target.value)} placeholder="Block B, Room 204" required />
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+
+                            <button 
+                                type="submit" 
+                                disabled={loading}
+                                className="btn btn-primary"
+                                style={{ width: '100%', marginTop: '10px', padding: '14px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 800 }}
+                            >
+                                {loading ? 'Creating Account & Registering...' : 'Create Account & Sign In'}
+                            </button>
+                        </form>
                     )}
                 </div>
             </div>
