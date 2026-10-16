@@ -1,148 +1,134 @@
-import React, { useState, useEffect } from 'react';
-import { supabase, BACKEND_URL } from '../../supabaseClient';
-import './History.css';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { api, errorMessage } from '../../lib/api';
+import { formatDate, formatTime } from '../../lib/dates';
+import type { Entry, EntryStatus } from '../../lib/types';
+import { Alert, Empty, Icon, PageHeader, StatusBadge } from '../../components/ui';
 
-interface LogEntry {
-    id: string;
-    date: string;
-    activity: string;
-    status: string;
-    photoProof?: string;
-}
+const FILTERS: Array<'All' | EntryStatus> = ['All', 'Pending', 'Approved', 'Rejected'];
 
 export const StudentHistory: React.FC = () => {
-    const [startDate, setStartDate] = useState<string>('');
-    const [endDate, setEndDate] = useState<string>('');
-    const [logs, setLogs] = useState<LogEntry[]>([]);
-    const [loading, setLoading] = useState<boolean>(true);
-    const [filtered, setFiltered] = useState<boolean>(false);
+    const navigate = useNavigate();
+    const [entries, setEntries] = useState<Entry[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [status, setStatus] = useState<'All' | EntryStatus>('All');
+    const [from, setFrom] = useState('');
+    const [to, setTo] = useState('');
 
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session?.user?.email) {
-                fetchHistory('all', session.user.email);
-            }
-        });
+        api<Entry[]>('/entries')
+            .then(setEntries)
+            .catch((e) => setError(errorMessage(e)))
+            .finally(() => setLoading(false));
     }, []);
 
-    const fetchHistory = async (mode: 'all' | 'custom', userEmail: string) => {
-        setLoading(true);
-        try {
-            const res = await fetch(`${BACKEND_URL}/api/entries?studentEmail=${encodeURIComponent(userEmail)}`);
-            const data = await res.json();
+    const shown = useMemo(
+        () =>
+            entries.filter(
+                (e) => (status === 'All' || e.status === status) && (!from || e.date >= from) && (!to || e.date <= to),
+            ),
+        [entries, status, from, to],
+    );
 
-            let list: LogEntry[] = data.map((d: any) => ({
-                id: d.id,
-                date: d.date || '',
-                activity: d.description || '',
-                status: d.status || 'Pending',
-                photoProof: d.image_url
-            }));
-
-            if (mode === 'custom') {
-                if (!startDate || !endDate) {
-                    alert("Please fill both date fields.");
-                    setLoading(false);
-                    return;
-                }
-                list = list.filter(item => item.date >= startDate && item.date <= endDate);
-                setFiltered(true);
-            } else {
-                setFiltered(false);
-            }
-
-            setLogs(list);
-        } catch (err) {
-            console.error("Failed to load history: ", err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleApplyFilter = async () => {
-        const session = (await supabase.auth.getSession()).data.session;
-        if (session?.user?.email) {
-            fetchHistory('custom', session.user.email);
-        }
-    };
-
-    const handleResetFilter = async () => {
-        setStartDate('');
-        setEndDate('');
-        const session = (await supabase.auth.getSession()).data.session;
-        if (session?.user?.email) {
-            fetchHistory('all', session.user.email);
-        }
-    };
+    const count = (s: 'All' | EntryStatus) => (s === 'All' ? entries.length : entries.filter((e) => e.status === s).length);
+    const filtered = status !== 'All' || from || to;
 
     return (
-        <div className="card animated-fade-in">
-            <h2 className="card-title">📊 Filter Log History</h2>
-            
-            <div className="filter-row">
-                <div className="form-group">
-                    <label>From Date</label>
-                    <input 
-                        type="date" 
-                        value={startDate} 
-                        onChange={(e) => setStartDate(e.target.value)} 
-                    />
-                </div>
-                <div className="form-group">
-                    <label>To Date</label>
-                    <input 
-                        type="date" 
-                        value={endDate} 
-                        onChange={(e) => setEndDate(e.target.value)} 
-                    />
-                </div>
-                <div style={{ display: 'flex', gap: '10px', alignSelf: 'flex-end', flexWrap: 'wrap' }}>
-                    <button 
-                        onClick={handleApplyFilter} 
-                        className="btn btn-primary" 
-                        style={{ height: '44px', width: 'auto' }}
-                    >
-                        Apply Filter
-                    </button>
-                    {filtered && (
-                        <button 
-                            onClick={handleResetFilter} 
-                            className="btn btn-danger" 
-                            style={{ height: '44px', width: 'auto', backgroundColor: '#64748b' }}
-                        >
-                            Reset
-                        </button>
-                    )}
-                </div>
-            </div>
+        <>
+            <PageHeader title="My logbook" subtitle="Every entry you've submitted, with your supervisor's feedback." />
 
-            <div id="logsDisplay">
-                {loading ? (
-                    <p style={{ textAlign: 'center', color: '#64748b', padding: '20px' }}>Loading logs history...</p>
-                ) : logs.length === 0 ? (
-                    <p style={{ textAlign: 'center', color: '#64748b', padding: '20px' }}>No logs matching this range.</p>
-                ) : (
-                    logs.map(log => (
-                        <div key={log.id} style={{ borderBottom: '1px solid var(--border-color)', padding: '20px 0', animation: 'scaleUp 0.3s ease' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '8px' }}>
-                                <strong style={{ color: 'var(--primary-slate)', fontSize: '1.05rem' }}>🗓️ {log.date}</strong>
-                                <span className={`status-badge status-${log.status}`}>{log.status}</span>
-                            </div>
-                            <p style={{ color: '#475569', fontSize: '0.92rem', marginBottom: '12px', whiteSpace: 'pre-wrap' }}>{log.activity}</p>
-                            {log.photoProof && (
-                                <a 
-                                    href={log.photoProof} 
-                                    target="_blank" 
-                                    rel="noreferrer"
-                                    style={{ fontSize: '0.8rem', color: 'var(--accent-sky)', fontWeight: 700, textDecoration: 'none' }}
-                                >
-                                    🖼️ Inspect Attachment
-                                </a>
-                            )}
+            <section className="card">
+                <div className="filters">
+                    <div className="chips" role="group" aria-label="Filter by status">
+                        {FILTERS.map((f) => (
+                            <button key={f} className={`chip ${status === f ? 'on' : ''}`} onClick={() => setStatus(f)}>
+                                {f} <span>{count(f)}</span>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="date-range">
+                        <div className="field">
+                            <label htmlFor="from">From</label>
+                            <input id="from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
                         </div>
-                    ))
+                        <div className="field">
+                            <label htmlFor="to">To</label>
+                            <input id="to" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+                        </div>
+                        {filtered && (
+                            <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => {
+                                    setStatus('All');
+                                    setFrom('');
+                                    setTo('');
+                                }}
+                            >
+                                Clear
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {error && <Alert kind="error">{error}</Alert>}
+
+                {loading ? (
+                    <p className="muted pad">Loading your logs…</p>
+                ) : shown.length === 0 ? (
+                    <Empty icon="book" title={entries.length === 0 ? 'No logs yet' : 'No logs match these filters'}>
+                        {entries.length === 0 ? 'Your first entry will show up here once you submit it.' : 'Try widening the date range or status.'}
+                    </Empty>
+                ) : (
+                    <ul className="log-list">
+                        {shown.map((e) => (
+                            <li key={e.id} className={`log log-${e.status.toLowerCase()}`}>
+                                <div className="log-top">
+                                    <strong>{formatDate(e.date)}</strong>
+                                    <StatusBadge status={e.status} />
+                                </div>
+                                <p className="log-body">{e.description}</p>
+                                {e.image_url && (
+                                    <a href={e.image_url} target="_blank" rel="noreferrer" className="log-photo">
+                                        <img src={e.image_url} alt="Work evidence" loading="lazy" />
+                                    </a>
+                                )}
+
+                                {e.supervisor_comment && (
+                                    <div className="feedback-box">
+                                        <Icon name="message" size={14} />
+                                        <div>
+                                            <strong>Supervisor feedback</strong>
+                                            <p>{e.supervisor_comment}</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="log-foot">
+                                    <span className="muted">Submitted {formatTime(e.created_at)}</span>
+                                    {e.image_url && (
+                                        <a href={e.image_url} target="_blank" rel="noreferrer" className="link-sm">
+                                            <Icon name="image" size={14} /> Attachment
+                                        </a>
+                                    )}
+                                    {e.status === 'Rejected' && (
+                                        <button
+                                            className="btn btn-secondary btn-sm"
+                                            onClick={() =>
+                                                navigate('/student/dashboard', {
+                                                    state: { date: e.date, description: e.description, image_url: e.image_url },
+                                                })
+                                            }
+                                        >
+                                            Fix and resubmit
+                                        </button>
+                                    )}
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
                 )}
-            </div>
-        </div>
+            </section>
+        </>
     );
 };

@@ -1,310 +1,203 @@
-import React, { useState, useEffect } from 'react';
-import { BACKEND_URL } from '../../supabaseClient';
-import './Dashboard.css';
-
-interface LogPipelineEntry {
-    id: string;
-    studentName: string;
-    email: string;
-    date: string;
-    activity: string;
-    photoProof: string;
-    location: {
-        lat: number;
-        lng: number;
-    };
-    status: string;
-}
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { api, errorMessage } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
+import { formatDate, startOfWeekStr } from '../../lib/dates';
+import type { Entry } from '../../lib/types';
+import { Alert, Avatar, Empty, Icon, MonthCalendar, Stat, type DayMark } from '../../components/ui';
+import banner from '../../assets/supervisor-banner.jpg';
 
 export const SupervisorDashboard: React.FC = () => {
-    const [pendingLogs, setPendingLogs] = useState<LogPipelineEntry[]>([]);
-    const [searchVal, setSearchVal] = useState<string>('');
-    const [yesterdayCount, setYesterdayCount] = useState<number>(0);
-    const [weeklyTotal, setWeeklyTotal] = useState<number>(0);
-    const [totalPending, setTotalPending] = useState<number>(0);
-    const [pendingDates, setPendingDates] = useState<Set<string>>(new Set());
+    const { profile } = useAuth();
+    const [entries, setEntries] = useState<Entry[]>([]);
+    const [studentCount, setStudentCount] = useState(0);
+    const [unread, setUnread] = useState(0);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [search, setSearch] = useState('');
 
-    useEffect(() => {
-        fetchLogsAndMetrics();
+    const [rejectingId, setRejectingId] = useState<number | null>(null);
+    const [comment, setComment] = useState('');
+    const [busyId, setBusyId] = useState<number | null>(null);
+
+    const load = useCallback(async () => {
+        try {
+            const [list, students, msgs] = await Promise.all([
+                api<Entry[]>('/entries'),
+                api<unknown[]>('/students'),
+                api<{ count: number }>('/messages/unread-count'),
+            ]);
+            setEntries(list);
+            setStudentCount(students.length);
+            setUnread(msgs.count);
+            setError('');
+        } catch (err) {
+            setError(errorMessage(err));
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    const fetchLogsAndMetrics = async () => {
+    useEffect(() => {
+        load();
+    }, [load]);
+
+    const pending = useMemo(() => entries.filter((e) => e.status === 'Pending').sort((a, b) => a.date.localeCompare(b.date)), [entries]);
+    const queue = pending.filter((e) => {
+        const q = search.trim().toLowerCase();
+        return !q || (e.student_name || '').toLowerCase().includes(q) || e.student_email.toLowerCase().includes(q);
+    });
+    const weekStart = startOfWeekStr();
+    const reviewedThisWeek = entries.filter((e) => e.reviewed_at && e.reviewed_at.slice(0, 10) >= weekStart).length;
+
+    const marks = useMemo(() => {
+        const m: Record<string, DayMark> = {};
+        pending.forEach((e) => (m[e.date] = 'Pending'));
+        return m;
+    }, [pending]);
+
+    const review = async (id: number, status: 'Approved' | 'Rejected', note?: string) => {
+        setBusyId(id);
+        setError('');
         try {
-            const res = await fetch(`${BACKEND_URL}/api/entries`);
-            const allEntries = await res.json();
-
-            const pendingList: LogPipelineEntry[] = [];
-            const datesSet = new Set<string>();
-
-            const yesterdayStr = getFormattedOffsetDate(-1);
-            const startOfWeek = new Date();
-            const today = new Date();
-            startOfWeek.setDate(today.getDate() - today.getDay());
-            startOfWeek.setHours(0, 0, 0, 0);
-
-            let yesterday = 0;
-            let weekly = 0;
-            let pendingCount = 0;
-
-            allEntries.forEach((d: any) => {
-                if (d.status === "Pending" || d.status === "pending") {
-                    pendingCount++;
-                    if (d.date) datesSet.add(d.date);
-                    pendingList.push({
-                        id: d.id,
-                        studentName: d.student_name || 'Student',
-                        email: d.student_email || '',
-                        date: d.date || '',
-                        activity: d.description || '',
-                        photoProof: d.image_url || '',
-                        location: {
-                            lat: d.location?.latitude || 0,
-                            lng: d.location?.longitude || 0
-                        },
-                        status: d.status
-                    });
-                }
-
-                if (d.date === yesterdayStr) {
-                    yesterday++;
-                }
-
-                if (d.created_at) {
-                    const tDate = new Date(d.created_at);
-                    if (tDate >= startOfWeek) {
-                        weekly++;
-                    }
-                }
-            });
-
-            setPendingLogs(pendingList);
-            setPendingDates(datesSet);
-            setTotalPending(pendingCount);
-            setYesterdayCount(yesterday);
-            setWeeklyTotal(weekly);
+            await api(`/entries/${id}/review`, { method: 'PUT', body: { status, comment: note } });
+            setRejectingId(null);
+            setComment('');
+            await load();
         } catch (err) {
-            console.error("Failed to fetch supervisor dashboard metrics: ", err);
+            setError(errorMessage(err));
+        } finally {
+            setBusyId(null);
         }
     };
-
-    const getFormattedOffsetDate = (offset: number): string => {
-        const d = new Date();
-        d.setDate(d.getDate() + offset);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    };
-
-    const handleApprove = async (id: string) => {
-        try {
-            await fetch(`${BACKEND_URL}/api/entries/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: "Approved" })
-            });
-            fetchLogsAndMetrics();
-        } catch (err: any) {
-            alert("Approval error: " + err.message);
-        }
-    };
-
-    const handleReject = async (id: string) => {
-        try {
-            await fetch(`${BACKEND_URL}/api/entries/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: "Rejected" })
-            });
-            fetchLogsAndMetrics();
-        } catch (err: any) {
-            alert("Rejection error: " + err.message);
-        }
-    };
-
-    // Filter list
-    const filteredLogs = pendingLogs.filter(log => 
-        log.studentName.toLowerCase().includes(searchVal.toLowerCase()) ||
-        log.email.toLowerCase().includes(searchVal.toLowerCase())
-    );
-
-    // Calendar Heatmap rendering helper
-    const renderCalendarDays = () => {
-        const today = new Date();
-        const year = today.getFullYear();
-        const month = today.getMonth();
-
-        const firstDayIndex = new Date(year, month, 1).getDay();
-        const totalDays = new Date(year, month + 1, 0).getDate();
-
-        const days: React.ReactNode[] = [];
-
-        // Fillers
-        for (let i = 0; i < firstDayIndex; i++) {
-            days.push(<div key={`empty-${i}`} className="calendar-day day-empty"></div>);
-        }
-
-        // Days
-        for (let day = 1; day <= totalDays; day++) {
-            const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const isPending = pendingDates.has(dayStr);
-            const pendingClass = isPending ? "day-has-pending" : "";
-
-            days.push(
-                <div 
-                    key={`day-${day}`} 
-                    className={`calendar-day ${pendingClass}`} 
-                    title={isPending ? 'Contains pending submissions' : 'No pipeline logs for today'}
-                >
-                    {day}
-                </div>
-            );
-        }
-
-        return days;
-    };
-
-    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    const currentMonthLabel = `${monthNames[new Date().getMonth()]} ${new Date().getFullYear()}`;
 
     return (
-        <div className="animated-fade-in">
-            {/* Metrics */}
-            <div className="metrics-grid">
-                <div className="metric-card" style={{ borderLeft: '4px solid var(--accent-blue)' }}>
-                    <div className="metric-data">
-                        <h4>Logs Submitted Yesterday</h4>
-                        <p>{yesterdayCount}</p>
-                    </div>
-                    <div className="metric-icon" style={{ background: 'rgba(37, 99, 235, 0.1)', color: 'var(--accent-blue)' }}>👤</div>
-                </div>
-                <div className="metric-card" style={{ borderLeft: '4px solid var(--status-pending)' }}>
-                    <div className="metric-data">
-                        <h4>Logs Submitted This Week</h4>
-                        <p>{weeklyTotal}</p>
-                    </div>
-                    <div className="metric-icon" style={{ background: 'rgba(245, 158, 11, 0.1)', color: 'var(--status-pending)' }}>⏳</div>
-                </div>
-                <div className="metric-card" style={{ borderLeft: '4px solid var(--status-approved)' }}>
-                    <div className="metric-data">
-                        <h4>Remaining Verification Queue</h4>
-                        <p>{totalPending}</p>
-                    </div>
-                    <div className="metric-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--status-approved)' }}>✅</div>
-                </div>
-            </div>
-
-            <div className="supervisor-dashboard-grid">
-                {/* Pipeline list */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                    <div className="card" style={{ marginBottom: 0 }}>
-                        <h3 className="card-title">📊 Unreviewed Log Pipeline</h3>
-                        
-                        <div className="filter-row" style={{ padding: '12px', marginBottom: '16px' }}>
-                            <div className="form-group" style={{ width: '100%', marginBottom: 0 }}>
-                                <input 
-                                    type="text" 
-                                    value={searchVal} 
-                                    onChange={(e) => setSearchVal(e.target.value)} 
-                                    placeholder="Filter queue by student name or email..." 
-                                />
-                            </div>
-                        </div>
-
-                        <div className="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Student</th>
-                                        <th>Date</th>
-                                        <th>Description of Work</th>
-                                        <th>Verification Checkpoint</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filteredLogs.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={5} style={{ textAlign: 'center', color: '#64748b', padding: '30px' }}>
-                                                No logs currently waiting evaluation.
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        filteredLogs.map(log => (
-                                            <tr key={log.id} className="log-pipeline-row" style={{ animation: 'scaleUp 0.3s ease' }}>
-                                                <td data-label="Student">
-                                                    <b>👤 {log.studentName}</b>
-                                                    <br />
-                                                    <small style={{ color: '#64748b' }}>{log.email}</small>
-                                                </td>
-                                                <td data-label="Date" style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>
-                                                    {log.date}
-                                                </td>
-                                                <td data-label="Description of Work" style={{ whiteSpace: 'pre-wrap' }}>
-                                                    {log.activity}
-                                                </td>
-                                                <td data-label="Verification Checkpoint">
-                                                    <a 
-                                                        href={`https://maps.google.com/?q=${log.location.lat},${log.location.lng}`} 
-                                                        target="_blank" 
-                                                        rel="noreferrer"
-                                                        style={{ color: 'var(--accent-blue)', textDecoration: 'none', fontWeight: 700, display: 'block', marginBottom: '4px' }}
-                                                    >
-                                                        📍 View Map Location
-                                                    </a>
-                                                    {log.photoProof && (
-                                                        <a 
-                                                            href={log.photoProof} 
-                                                            target="_blank" 
-                                                            rel="noreferrer"
-                                                            style={{ fontSize: '11px', color: 'var(--accent-sky)', fontWeight: 600, textDecoration: 'none' }}
-                                                        >
-                                                            🖼️ Inspect Evidence
-                                                        </a>
-                                                    )}
-                                                </td>
-                                                <td data-label="Actions" style={{ display: 'flex', gap: '8px' }}>
-                                                    <button 
-                                                        onClick={() => handleApprove(log.id)} 
-                                                        className="btn btn-accent" 
-                                                        style={{ padding: '6px 12px', fontSize: '12px', width: 'auto' }}
-                                                    >
-                                                        Approve
-                                                    </button>
-                                                    <button 
-                                                        onClick={() => handleReject(log.id)} 
-                                                        className="btn btn-danger" 
-                                                        style={{ padding: '6px 12px', fontSize: '12px', width: 'auto' }}
-                                                    >
-                                                        Reject
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Calendar */}
-                <div className="calendar-wrapper" style={{ alignSelf: 'flex-start' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                        <h3 style={{ fontWeight: 800, color: 'var(--primary-slate)' }}>📅 SIWES Pipeline Calendar</h3>
-                        <h4 style={{ color: 'var(--accent-blue)', fontWeight: 700 }}>{currentMonthLabel}</h4>
-                    </div>
-                    
-                    <p style={{ color: '#64748b', fontSize: '0.85rem', fontWeight: 500, marginBottom: '15px' }}>
-                        Dots indicate dates containing student logs pending review.
+        <>
+            <section className="banner" style={{ backgroundImage: `url(${banner})` }}>
+                <div className="banner-text">
+                    <small>{[profile?.department, profile?.institution].filter(Boolean).join(' · ')}</small>
+                    <h1>
+                        Welcome, {profile?.title} {profile?.full_name.split(' ').slice(-1)[0]}
+                    </h1>
+                    <p>
+                        {pending.length === 0
+                            ? 'Your review queue is clear.'
+                            : `${pending.length} log${pending.length === 1 ? '' : 's'} waiting for your review.`}
                     </p>
-
-                    <div className="calendar-header-row">
-                        <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
-                    </div>
-                    
-                    <div className="calendar-grid">
-                        {renderCalendarDays()}
-                    </div>
                 </div>
+            </section>
+
+            <div className="stats">
+                <Stat icon="clock" tone="amber" label="Awaiting review" value={pending.length} />
+                <Stat icon="check-circle" tone="green" label="Reviewed this week" value={reviewedThisWeek} />
+                <Stat icon="users" tone="brand" label="Students" value={studentCount} />
+                <Stat icon="message" tone="slate" label="Unread messages" value={unread} />
             </div>
-        </div>
+
+            {error && <Alert kind="error">{error}</Alert>}
+
+            <div className="layout-2">
+                <section className="card">
+                    <div className="card-head">
+                        <h2>Review queue</h2>
+                        <div className="search">
+                            <Icon name="search" size={16} />
+                            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filter by student" aria-label="Filter by student" />
+                        </div>
+                    </div>
+
+                    {loading ? (
+                        <p className="muted pad">Loading…</p>
+                    ) : studentCount === 0 ? (
+                        <Empty icon="users" title="No students assigned yet">
+                            Students choose you as their supervisor when they sign up, or you can <Link to="/supervisor/students">add one</Link>.
+                        </Empty>
+                    ) : queue.length === 0 ? (
+                        <Empty icon="check-circle" title={pending.length ? 'No matches' : 'All caught up'}>
+                            {pending.length ? 'No pending logs match that name.' : 'New student logs will appear here for review.'}
+                        </Empty>
+                    ) : (
+                        <ul className="review-list">
+                            {queue.map((e) => (
+                                <li key={e.id} className="review">
+                                    <div className="review-head">
+                                        <Avatar name={e.student_name || e.student_email} size={38} />
+                                        <div className="person-text">
+                                            <strong>{e.student_name || e.student_email}</strong>
+                                            <small>{e.student_email}</small>
+                                        </div>
+                                        <span className="review-date">{formatDate(e.date)}</span>
+                                    </div>
+
+                                    <p className="log-body">{e.description}</p>
+                                    {e.image_url && (
+                                        <a href={e.image_url} target="_blank" rel="noreferrer" className="log-photo">
+                                            <img src={e.image_url} alt="Work evidence" loading="lazy" />
+                                        </a>
+                                    )}
+
+                                    <div className="review-links">
+                                        {e.latitude !== null && e.longitude !== null && (
+                                            <a href={`https://www.google.com/maps?q=${e.latitude},${e.longitude}`} target="_blank" rel="noreferrer" className="link-sm">
+                                                <Icon name="pin" size={14} /> View location
+                                            </a>
+                                        )}
+                                        {e.image_url && (
+                                            <a href={e.image_url} target="_blank" rel="noreferrer" className="link-sm">
+                                                <Icon name="image" size={14} /> View attachment
+                                            </a>
+                                        )}
+                                    </div>
+
+                                    {rejectingId === e.id ? (
+                                        <div className="reject-box">
+                                            <label htmlFor={`c${e.id}`}>What needs to change?</label>
+                                            <textarea
+                                                id={`c${e.id}`}
+                                                rows={3}
+                                                autoFocus
+                                                value={comment}
+                                                onChange={(ev) => setComment(ev.target.value)}
+                                                placeholder="The student will see this and can resubmit a corrected log."
+                                            />
+                                            <div className="row-actions">
+                                                <button
+                                                    className="btn btn-danger btn-sm"
+                                                    disabled={busyId === e.id || !comment.trim()}
+                                                    onClick={() => review(e.id, 'Rejected', comment)}
+                                                >
+                                                    Reject with feedback
+                                                </button>
+                                                <button className="btn btn-ghost btn-sm" onClick={() => { setRejectingId(null); setComment(''); }}>
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="row-actions">
+                                            <button className="btn btn-primary btn-sm" disabled={busyId === e.id} onClick={() => review(e.id, 'Approved')}>
+                                                <Icon name="check" size={14} /> Approve
+                                            </button>
+                                            <button className="btn btn-secondary btn-sm" onClick={() => { setRejectingId(e.id); setComment(''); }}>
+                                                <Icon name="x" size={14} /> Reject
+                                            </button>
+                                        </div>
+                                    )}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </section>
+
+                <aside className="side-stack">
+                    <section className="card">
+                        <div className="card-head">
+                            <h2>Pending by date</h2>
+                        </div>
+                        <MonthCalendar marks={marks} />
+                    </section>
+                </aside>
+            </div>
+        </>
     );
 };

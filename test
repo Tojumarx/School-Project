@@ -1,0 +1,14 @@
+What you need to do
+
+- Locally: nothing. I already applied the migration to your running local Supabase, so just use the app.
+- On a hosted Supabase project (when you deploy):
+  a. Install and log in to the CLI: supabase login.
+  b. From backend, run supabase link --project-ref <your-project-ref>. You'll find the ref in the dashboard URL.
+  c. Run supabase db push to create the bucket and policies. Or open Dashboard → SQL Editor and paste in the contents of the migration file.
+  d. Check Dashboard → Storage: log-photos should be listed as Public.
+  e. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in frontend/.env to the hosted project's values. Don't put the service role key in the frontend.
+
+Limits
+
+- Each log holds one photo. You said "pics", so if you want several per log I can add up to 3, but that needs a small database change.
+- Photos are public to anyone who has the link. They aren't listed anywhere, but if you'd rather keep them private I can switch to signed URLs.

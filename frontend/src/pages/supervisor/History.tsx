@@ -1,147 +1,117 @@
-import React, { useState } from 'react';
-import { BACKEND_URL } from '../../supabaseClient';
-import './History.css';
-
-interface LogArchiveEntry {
-    id: string;
-    studentName: string;
-    email: string;
-    date: string;
-    activity: string;
-    status: string;
-}
+import React, { useEffect, useMemo, useState } from 'react';
+import { api, errorMessage } from '../../lib/api';
+import { formatDate } from '../../lib/dates';
+import type { Entry, EntryStatus } from '../../lib/types';
+import { Alert, Avatar, Empty, Icon, PageHeader, StatusBadge } from '../../components/ui';
 
 export const SupervisorHistory: React.FC = () => {
-    const [searchTerm, setSearchTerm] = useState<string>('');
-    const [startDate, setStartDate] = useState<string>('');
-    const [endDate, setEndDate] = useState<string>('');
-    const [archiveLogs, setArchiveLogs] = useState<LogArchiveEntry[]>([]);
-    const [loading, setLoading] = useState<boolean>(false);
-    const [hasSearched, setHasSearched] = useState<boolean>(false);
+    const [entries, setEntries] = useState<Entry[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
 
-    const runArchiveSearch = async () => {
-        setLoading(true);
-        setHasSearched(true);
-        try {
-            const res = await fetch(`${BACKEND_URL}/api/entries`);
-            const data = await res.json();
-            const term = searchTerm.toLowerCase().trim();
+    const [search, setSearch] = useState('');
+    const [status, setStatus] = useState<'All' | EntryStatus>('All');
+    const [from, setFrom] = useState('');
+    const [to, setTo] = useState('');
 
-            let list: LogArchiveEntry[] = data.map((d: any) => ({
-                id: d.id,
-                studentName: d.student_name || 'Student',
-                email: d.student_email || '',
-                date: d.date || '',
-                activity: d.description || '',
-                status: d.status || 'Pending'
-            }));
+    useEffect(() => {
+        api<Entry[]>('/entries')
+            .then(setEntries)
+            .catch((e) => setError(errorMessage(e)))
+            .finally(() => setLoading(false));
+    }, []);
 
-            if (startDate && endDate) {
-                list = list.filter(item => item.date >= startDate && item.date <= endDate);
-            }
-
-            if (term) {
-                list = list.filter(item => 
-                    item.studentName.toLowerCase().includes(term) ||
-                    item.email.toLowerCase().includes(term)
-                );
-            }
-
-            setArchiveLogs(list);
-        } catch (err: any) {
-            console.error("Failed to query log archives: ", err);
-        } finally {
-            setLoading(false);
-        }
-    };
+    const shown = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        return entries.filter(
+            (e) =>
+                (status === 'All' || e.status === status) &&
+                (!from || e.date >= from) &&
+                (!to || e.date <= to) &&
+                (!q || (e.student_name || '').toLowerCase().includes(q) || e.student_email.toLowerCase().includes(q)),
+        );
+    }, [entries, search, status, from, to]);
 
     return (
-        <div className="card animated-fade-in">
-            <h3 className="card-title">📜 Filter Student Log Archives</h3>
-            
-            <div className="filter-row">
-                <div className="form-group" style={{ flex: 2 }}>
-                    <label>Filter by Student Name or Email</label>
-                    <input 
-                        type="text" 
-                        value={searchTerm} 
-                        onChange={(e) => setSearchTerm(e.target.value)} 
-                        placeholder="Search student name or email..." 
-                    />
-                </div>
-                <div className="form-group">
-                    <label>From Date</label>
-                    <input 
-                        type="date" 
-                        value={startDate} 
-                        onChange={(e) => setStartDate(e.target.value)} 
-                    />
-                </div>
-                <div className="form-group">
-                    <label>To Date</label>
-                    <input 
-                        type="date" 
-                        value={endDate} 
-                        onChange={(e) => setEndDate(e.target.value)} 
-                    />
-                </div>
-                <button 
-                    onClick={runArchiveSearch} 
-                    className="btn btn-primary" 
-                    style={{ height: '46px', width: 'auto', alignSelf: 'flex-end' }}
-                >
-                    Search Archives
-                </button>
-            </div>
+        <>
+            <PageHeader title="Logbook archive" subtitle="Every log from your students, searchable by name, status and date." />
 
-            <div className="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Student</th>
-                            <th>Date</th>
-                            <th>Work Done</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {loading ? (
-                            <tr>
-                                <td colSpan={4} style={{ textAlign: 'center', color: '#64748b', padding: '20px' }}>
-                                    Querying archives...
-                                </td>
-                            </tr>
-                        ) : archiveLogs.length === 0 ? (
-                            <tr>
-                                <td colSpan={4} style={{ textAlign: 'center', color: '#64748b', padding: '20px' }}>
-                                    {hasSearched ? 'No matching records found.' : 'Execute a search using the parameters above.'}
-                                </td>
-                            </tr>
-                        ) : (
-                            archiveLogs.map(log => (
-                                <tr key={log.id} style={{ animation: 'scaleUp 0.3s ease' }}>
-                                    <td data-label="Student">
-                                        <b>👤 {log.studentName}</b>
-                                        <br />
-                                        <small style={{ color: '#64748b' }}>{log.email}</small>
-                                    </td>
-                                    <td data-label="Date" style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>
-                                        {log.date}
-                                    </td>
-                                    <td data-label="Work Done" style={{ whiteSpace: 'pre-wrap' }}>
-                                        {log.activity}
-                                    </td>
-                                    <td data-label="Status">
-                                        <span className={`status-badge status-${log.status}`}>
-                                            {log.status}
-                                        </span>
-                                    </td>
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+            <section className="card">
+                <div className="filter-bar">
+                    <div className="field grow">
+                        <label htmlFor="q">Student</label>
+                        <div className="search search-block">
+                            <Icon name="search" size={16} />
+                            <input id="q" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or email" />
+                        </div>
+                    </div>
+                    <div className="field">
+                        <label htmlFor="st">Status</label>
+                        <select id="st" value={status} onChange={(e) => setStatus(e.target.value as 'All' | EntryStatus)}>
+                            <option>All</option>
+                            <option>Pending</option>
+                            <option>Approved</option>
+                            <option>Rejected</option>
+                        </select>
+                    </div>
+                    <div className="field">
+                        <label htmlFor="f">From</label>
+                        <input id="f" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+                    </div>
+                    <div className="field">
+                        <label htmlFor="t">To</label>
+                        <input id="t" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+                    </div>
+                </div>
+
+                {error && <Alert kind="error">{error}</Alert>}
+
+                {loading ? (
+                    <p className="muted pad">Loading…</p>
+                ) : shown.length === 0 ? (
+                    <Empty icon="history" title="No logs found">
+                        {entries.length ? 'No logs match these filters.' : 'Logs from your students will be archived here.'}
+                    </Empty>
+                ) : (
+                    <>
+                        <p className="muted small count">{shown.length} log{shown.length === 1 ? '' : 's'}</p>
+                        <div className="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Student</th>
+                                        <th>Date</th>
+                                        <th>Work done</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {shown.map((e) => (
+                                        <tr key={e.id}>
+                                            <td data-label="Student">
+                                                <div className="person">
+                                                    <Avatar name={e.student_name || e.student_email} size={32} />
+                                                    <div className="person-text">
+                                                        <strong>{e.student_name || e.student_email}</strong>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td data-label="Date" className="nowrap">{formatDate(e.date)}</td>
+                                            <td data-label="Work done">
+                                                <p className="clamp">{e.description}</p>
+                                                {e.supervisor_comment && (
+                                                    <small className="muted"><Icon name="message" size={12} /> {e.supervisor_comment}</small>
+                                                )}
+                                            </td>
+                                            <td data-label="Status"><StatusBadge status={e.status} /></td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
+                )}
+            </section>
+        </>
     );
 };

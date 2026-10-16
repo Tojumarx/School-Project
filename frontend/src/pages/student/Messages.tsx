@@ -1,140 +1,134 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { supabase, BACKEND_URL } from '../../supabaseClient';
-import './Messages.css';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { api, errorMessage } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
+import { formatTime } from '../../lib/dates';
+import type { Message } from '../../lib/types';
+import { Alert, Avatar, Empty, Icon, PageHeader } from '../../components/ui';
 
-interface Message {
-    id: string;
-    sender: string;
-    senderName: string;
-    recipient: string;
-    text: string;
-    created_at?: string;
-}
+const POLL_MS = 5000;
 
 export const StudentMessages: React.FC = () => {
-    const [msgText, setMsgText] = useState<string>('');
-    const [messages, setMessages] = useState<Message[]>([]);
-    const [currentUserEmail, setCurrentUserEmail] = useState<string>('');
-    const chatStreamRef = useRef<HTMLDivElement>(null);
+    const { profile } = useAuth();
+    const supervisor = profile?.supervisor;
 
-    useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session?.user?.email) {
-                const email = session.user.email;
-                setCurrentUserEmail(email);
-                fetchMessages();
-            }
-        });
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [text, setText] = useState('');
+    const [sending, setSending] = useState(false);
+    const [error, setError] = useState('');
+    const streamRef = useRef<HTMLDivElement>(null);
+    const lastCount = useRef(0);
+
+    const load = useCallback(async () => {
+        try {
+            setMessages(await api<Message[]>('/messages/thread'));
+        } catch (err) {
+            setError(errorMessage(err));
+        }
     }, []);
 
-    const fetchMessages = async () => {
-        try {
-            const res = await fetch(`${BACKEND_URL}/api/messages`);
-            const data = await res.json();
-            const list = data.map((m: any) => ({
-                id: m.id,
-                sender: m.sender_email || '',
-                senderName: m.sender_name || '',
-                recipient: m.receiver_email || 'ALL',
-                text: m.content || '',
-                created_at: m.created_at
-            }));
-            setMessages(list);
-        } catch (err) {
-            console.error("Failed to load messages: ", err);
-        }
-    };
-
-    // Auto scroll chat
     useEffect(() => {
-        if (chatStreamRef.current) {
-            chatStreamRef.current.scrollTop = chatStreamRef.current.scrollHeight;
+        load();
+        const timer = setInterval(load, POLL_MS);
+        return () => clearInterval(timer);
+    }, [load]);
+
+    // Only jump to the newest message when one arrives
+    useEffect(() => {
+        if (messages.length !== lastCount.current && streamRef.current) {
+            streamRef.current.scrollTop = streamRef.current.scrollHeight;
         }
+        lastCount.current = messages.length;
     }, [messages]);
 
-    const handleSendMessage = async () => {
-        if (!currentUserEmail || !msgText.trim()) return;
-
+    const send = async (e?: React.FormEvent) => {
+        e?.preventDefault();
+        const content = text.trim();
+        if (!content || sending) return;
+        setSending(true);
+        setError('');
         try {
-            await fetch(`${BACKEND_URL}/api/messages`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sender_email: currentUserEmail,
-                    receiver_email: 'SUPERVISOR',
-                    content: msgText.trim()
-                })
-            });
-            setMsgText('');
-            fetchMessages();
-        } catch (err: any) {
-            alert("Failed to send: " + err.message);
+            await api('/messages', { method: 'POST', body: { content } });
+            setText('');
+            await load();
+        } catch (err) {
+            setError(errorMessage(err));
+        } finally {
+            setSending(false);
         }
     };
 
-    const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter') {
-            handleSendMessage();
+    const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            send();
         }
     };
+
+    if (!supervisor) {
+        return (
+            <>
+                <PageHeader title="Supervisor chat" />
+                <section className="card">
+                    <Empty icon="message" title="No supervisor assigned yet">
+                        Choose your supervisor in <Link to="/student/settings">My Profile</Link> to start chatting.
+                    </Empty>
+                </section>
+            </>
+        );
+    }
 
     return (
-        <div className="card animated-fade-in">
-            <h2 className="card-title">💬 Chat with Supervisor</h2>
-            <div className="chat-container" id="chatStream" ref={chatStreamRef}>
-                {messages.length === 0 ? (
-                    <p style={{ textAlign: 'center', color: '#64748b', padding: '4px' }}>No messages in thread.</p>
-                ) : (
-                    messages.map(msg => {
-                        let cls = '';
-                        let lbl = '';
+        <>
+            <PageHeader title="Supervisor chat" subtitle="Ask questions and get notices from your supervisor." />
+            <section className="card chat-card">
+                <div className="chat-head">
+                    <Avatar name={supervisor.full_name} size={42} />
+                    <div>
+                        <strong>{[supervisor.title, supervisor.full_name].filter(Boolean).join(' ')}</strong>
+                        <small>{supervisor.department || supervisor.email}</small>
+                    </div>
+                </div>
 
-                        if (msg.sender === currentUserEmail) {
-                            cls = 'msg-student-sent';
-                            lbl = '📤 Sent';
-                        } else if (msg.recipient === 'ALL') {
-                            cls = 'msg-general';
-                            lbl = '📢 Broadcast Notice';
-                        } else {
-                            cls = 'msg-private';
-                            lbl = '🔒 Private Message';
-                        }
+                <div className="chat-stream" ref={streamRef}>
+                    {messages.length === 0 ? (
+                        <Empty icon="message" title="No messages yet">
+                            Say hello — your supervisor will see it right away.
+                        </Empty>
+                    ) : (
+                        messages.map((m) => {
+                            const mine = m.sender_id === profile?.id;
+                            return (
+                                <div key={m.id} className={`bubble ${mine ? 'mine' : 'theirs'} ${m.is_broadcast ? 'broadcast' : ''}`}>
+                                    {m.is_broadcast && (
+                                        <span className="bubble-tag">
+                                            <Icon name="megaphone" size={12} /> Notice to all students
+                                        </span>
+                                    )}
+                                    <p>{m.content}</p>
+                                    <time>{formatTime(m.created_at)}</time>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
 
-                        return (
-                            <div 
-                                key={msg.id} 
-                                className={`message-bubble ${cls}`} 
-                                style={{ 
-                                    animation: 'scaleUp 0.25s ease',
-                                    marginLeft: msg.sender === currentUserEmail ? 'auto' : undefined 
-                                }}
-                            >
-                                <small style={{ display: 'block', fontWeight: 700, color: 'var(--primary-slate)', marginBottom: '4px' }}>
-                                    {lbl}
-                                </small>
-                                <p style={{ wordBreak: 'break-word' }}>{msg.text}</p>
-                            </div>
-                        );
-                    })
-                )}
-            </div>
-            
-            <div style={{ display: 'flex', gap: '12px' }}>
-                <input 
-                    type="text" 
-                    value={msgText} 
-                    onChange={(e) => setMsgText(e.target.value)} 
-                    onKeyDown={handleKeyPress}
-                    placeholder="Type your reply here..." 
-                />
-                <button 
-                    onClick={handleSendMessage} 
-                    className="btn btn-primary" 
-                    style={{ width: 'auto', padding: '0 24px' }}
-                >
-                    Send
-                </button>
-            </div>
-        </div>
+                {error && <Alert kind="error">{error}</Alert>}
+
+                <form className="composer" onSubmit={send}>
+                    <textarea
+                        rows={1}
+                        value={text}
+                        onChange={(e) => setText(e.target.value)}
+                        onKeyDown={onKey}
+                        placeholder="Write a message… (Enter to send, Shift+Enter for a new line)"
+                        maxLength={2000}
+                    />
+                    <button type="submit" className="btn btn-primary" disabled={sending || !text.trim()}>
+                        <Icon name="send" size={16} /> Send
+                    </button>
+                </form>
+            </section>
+        </>
     );
 };

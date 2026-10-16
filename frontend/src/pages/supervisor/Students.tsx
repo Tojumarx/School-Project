@@ -1,177 +1,150 @@
-import React, { useState, useEffect } from 'react';
-import { supabase, BACKEND_URL } from '../../supabaseClient';
-import './Students.css';
-
-interface StudentProfile {
-    id: string;
-    fullName: string;
-    gender: string;
-    email: string;
-}
+import React, { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { api, errorMessage } from '../../lib/api';
+import { formatDate } from '../../lib/dates';
+import type { StudentRow } from '../../lib/types';
+import { Alert, Avatar, Empty, Icon, PageHeader } from '../../components/ui';
 
 export const SupervisorStudents: React.FC = () => {
-    const [students, setStudents] = useState<StudentProfile[]>([]);
-    const [searchVal, setSearchVal] = useState<string>('');
-    const [newEmail, setNewEmail] = useState<string>('');
-    const [newPass, setNewPass] = useState<string>('');
-    const [submitting, setSubmitting] = useState<boolean>(false);
+    const [students, setStudents] = useState<StudentRow[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [search, setSearch] = useState('');
+    const [error, setError] = useState('');
 
-    useEffect(() => {
-        fetchSupervisedStudents();
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [adding, setAdding] = useState(false);
+    const [formError, setFormError] = useState('');
+    const [success, setSuccess] = useState('');
+
+    const load = useCallback(async () => {
+        try {
+            setStudents(await api<StudentRow[]>('/students'));
+        } catch (err) {
+            setError(errorMessage(err));
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    const fetchSupervisedStudents = async () => {
-        try {
-            const res = await fetch(`${BACKEND_URL}/api/students`);
-            const data = await res.json();
-            const list: StudentProfile[] = data.map((d: any) => ({
-                id: d.id,
-                fullName: d.full_name || 'Anonymous',
-                gender: d.gender || 'Not specified',
-                email: d.email || ''
-            }));
-            setStudents(list);
-        } catch (err) {
-            console.error("Failed to load students list: ", err);
-        }
-    };
+    useEffect(() => {
+        load();
+    }, [load]);
 
-    const handleCreateStudent = async (e: React.FormEvent) => {
+    const create = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newEmail.trim() || newPass.length < 6) {
-            alert("Please provide a valid email and a password of at least 6 characters.");
-            return;
-        }
-
-        setSubmitting(true);
+        setFormError('');
+        setSuccess('');
+        setAdding(true);
         try {
-            // Sign up student in Supabase
-            const { error } = await supabase.auth.signUp({
-                email: newEmail.trim(),
-                password: newPass,
-                options: {
-                    data: {
-                        full_name: newEmail.split('@')[0].toUpperCase(),
-                        role: 'student'
-                    }
-                }
-            });
-
-            if (error) throw error;
-
-            alert(`Account successfully created for ${newEmail.trim()}!`);
-            setNewEmail('');
-            setNewPass('');
-            fetchSupervisedStudents();
-        } catch (err: any) {
-            alert("Error provisioning profile: " + err.message);
+            await api('/students', { method: 'POST', body: { full_name: name.trim(), email: email.trim(), password } });
+            setSuccess(`Account created for ${name.trim()}. Share the email and temporary password with them.`);
+            setName('');
+            setEmail('');
+            setPassword('');
+            await load();
+        } catch (err) {
+            setFormError(errorMessage(err));
         } finally {
-            setSubmitting(false);
+            setAdding(false);
         }
     };
 
-    const filteredStudents = students.filter(student => 
-        student.fullName.toLowerCase().includes(searchVal.toLowerCase()) ||
-        student.email.toLowerCase().includes(searchVal.toLowerCase())
-    );
+    const q = search.trim().toLowerCase();
+    const shown = students.filter((s) => !q || s.full_name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q) || (s.student_id || '').toLowerCase().includes(q));
 
     return (
-        <div className="animated-fade-in">
-            {/* Metric */}
-            <div className="metrics-grid">
-                <div className="metric-card" style={{ borderLeft: '4px solid var(--accent-blue)', width: '100%' }}>
-                    <div className="metric-data">
-                        <h4>Students Under Supervision</h4>
-                        <p>{students.length}</p>
-                    </div>
-                    <div className="metric-icon" style={{ background: 'rgba(37, 99, 235, 0.1)', color: 'var(--accent-blue)' }}>👥</div>
-                </div>
-            </div>
+        <>
+            <PageHeader title="My students" subtitle={`${students.length} student${students.length === 1 ? '' : 's'} under your supervision.`} />
+            {error && <Alert kind="error">{error}</Alert>}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px', alignItems: 'flex-start' }}>
-                
-                {/* Students list */}
-                <div className="card" style={{ marginBottom: 0 }}>
-                    <h3 className="card-title">👥 Registered Students</h3>
-                    
-                    <div className="filter-row" style={{ padding: '12px', marginBottom: '16px' }}>
-                        <div className="form-group" style={{ width: '100%', marginBottom: 0 }}>
-                            <input 
-                                type="text" 
-                                value={searchVal} 
-                                onChange={(e) => setSearchVal(e.target.value)} 
-                                placeholder="Quick search by student name or email..." 
-                            />
+            <div className="layout-2 layout-2-wide">
+                <section className="card">
+                    <div className="card-head">
+                        <h2>Students</h2>
+                        <div className="search">
+                            <Icon name="search" size={16} />
+                            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, email or matric" aria-label="Search students" />
                         </div>
                     </div>
 
-                    <div className="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Student</th>
-                                    <th>Gender</th>
-                                    <th>Email Address</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {filteredStudents.length === 0 ? (
+                    {loading ? (
+                        <p className="muted pad">Loading…</p>
+                    ) : shown.length === 0 ? (
+                        <Empty icon="users" title={students.length ? 'No matches' : 'No students yet'}>
+                            {students.length ? 'Try a different search.' : 'Students appear here when they pick you as their supervisor, or add one with the form.'}
+                        </Empty>
+                    ) : (
+                        <div className="table-wrap">
+                            <table>
+                                <thead>
                                     <tr>
-                                        <td colSpan={3} style={{ textAlign: 'center', color: '#64748b', padding: '20px' }}>
-                                            No registered students found.
-                                        </td>
+                                        <th>Student</th>
+                                        <th>Logs</th>
+                                        <th>Pending</th>
+                                        <th>Last log</th>
+                                        <th />
                                     </tr>
-                                ) : (
-                                    filteredStudents.map(student => (
-                                        <tr key={student.id} className="student-row" style={{ animation: 'scaleUp 0.3s ease' }}>
+                                </thead>
+                                <tbody>
+                                    {shown.map((s) => (
+                                        <tr key={s.id}>
                                             <td data-label="Student">
-                                                <b>👤 {student.fullName}</b>
+                                                <div className="person">
+                                                    <Avatar name={s.full_name} url={s.avatar_url} size={36} />
+                                                    <div className="person-text">
+                                                        <strong>{s.full_name}</strong>
+                                                        <small>{[s.student_id, s.course, s.level ? `${s.level}L` : null].filter(Boolean).join(' · ') || s.email}</small>
+                                                    </div>
+                                                </div>
                                             </td>
-                                            <td data-label="Gender">
-                                                <b>{student.gender}</b>
+                                            <td data-label="Logs">{s.stats.total}</td>
+                                            <td data-label="Pending">
+                                                {s.stats.pending > 0 ? <span className="badge badge-pending">{s.stats.pending}</span> : <span className="muted">0</span>}
                                             </td>
-                                            <td data-label="Email Address" style={{ fontWeight: 500, color: 'var(--accent-blue)' }}>
-                                                {student.email}
+                                            <td data-label="Last log">{s.stats.lastLogDate ? formatDate(s.stats.lastLogDate) : <span className="muted">Never</span>}</td>
+                                            <td className="cell-action">
+                                                <Link to={`/supervisor/messages?student=${s.id}`} className="btn btn-secondary btn-sm">
+                                                    <Icon name="message" size={14} /> Message
+                                                </Link>
                                             </td>
                                         </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                {/* Provision Form */}
-                <div className="card" style={{ marginBottom: 0 }}>
-                    <h3 className="card-title">🆕 Register New Student Account</h3>
-                    <form onSubmit={handleCreateStudent} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label>Student Email</label>
-                            <input 
-                                type="email" 
-                                value={newEmail} 
-                                onChange={(e) => setNewEmail(e.target.value)} 
-                                required 
-                                placeholder="name@fupre.edu.ng" 
-                            />
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label>Temporary Password</label>
-                            <input 
-                                type="password" 
-                                value={newPass} 
-                                onChange={(e) => setNewPass(e.target.value)} 
-                                required 
-                                placeholder="Min 6 chars" 
-                            />
-                        </div>
-                        <button type="submit" className="btn btn-accent" disabled={submitting}>
-                            {submitting ? 'Creating Account...' : 'Create Account'}
-                        </button>
-                    </form>
-                </div>
+                    )}
+                </section>
 
-                </div>
-        </div>
+                <aside className="side-stack">
+                    <section className="card">
+                        <div className="card-head">
+                            <h2>Add a student</h2>
+                        </div>
+                        <p className="muted small">Create an account for a student and assign them to yourself.</p>
+                        {formError && <Alert kind="error">{formError}</Alert>}
+                        {success && <Alert kind="success">{success}</Alert>}
+                        <form onSubmit={create} className="stack">
+                            <div className="field">
+                                <label htmlFor="sn">Full name</label>
+                                <input id="sn" value={name} onChange={(e) => setName(e.target.value)} required />
+                            </div>
+                            <div className="field">
+                                <label htmlFor="se">Email</label>
+                                <input id="se" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                            </div>
+                            <div className="field">
+                                <label htmlFor="sp">Temporary password</label>
+                                <input id="sp" type="text" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} placeholder="At least 6 characters" />
+                            </div>
+                            <button type="submit" className="btn btn-primary" disabled={adding}>
+                                {adding ? 'Creating…' : 'Create account'}
+                            </button>
+                        </form>
+                    </section>
+                </aside>
+            </div>
+        </>
     );
 };

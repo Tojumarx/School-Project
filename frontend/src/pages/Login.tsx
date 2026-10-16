@@ -1,20 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import coverImg from '../assets/login_cover.png';
+import { api, errorMessage } from '../lib/api';
+import { portalFor, useAuth } from '../lib/auth';
+import type { Role, SupervisorSummary } from '../lib/types';
+import { Alert, Icon } from '../components/ui';
+import coverImg from '../assets/login-cover.jpg';
 import institutionList from '../data/institutions.json';
-import './Login.css';
 
-interface Supervisor {
-    id: string | number;
-    full_name?: string;
-    name?: string;
-    email: string;
-    department?: string;
-    institution?: string;
-}
-
-const POPULAR_DEPARTMENTS = [
+const DEPARTMENTS = [
     'Computer Science',
     'Electrical & Electronics Engineering',
     'Mechanical Engineering',
@@ -35,665 +29,310 @@ const POPULAR_DEPARTMENTS = [
     'Physics & Geophysics',
     'Chemistry & Industrial Chemistry',
     'Political Science & Public Administration',
-    'Other (Specify Custom Department)',
 ];
+const OTHER = '__other__';
+
+const PasswordInput: React.FC<{
+    value: string;
+    onChange: (v: string) => void;
+    autoComplete: string;
+    placeholder?: string;
+}> = ({ value, onChange, autoComplete, placeholder }) => {
+    const [show, setShow] = useState(false);
+    return (
+        <div className="input-with-action">
+            <input
+                type={show ? 'text' : 'password'}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                required
+                minLength={6}
+                autoComplete={autoComplete}
+                placeholder={placeholder || 'At least 6 characters'}
+            />
+            <button type="button" className="input-action" onClick={() => setShow(!show)} aria-label={show ? 'Hide password' : 'Show password'}>
+                <Icon name={show ? 'eye-off' : 'eye'} />
+            </button>
+        </div>
+    );
+};
 
 export const Login: React.FC = () => {
-    const [mode, setMode] = useState<'LOGIN' | 'SIGNUP'>('LOGIN');
-    const [loading, setLoading] = useState(false);
+    const { profile, loading: authLoading, refresh } = useAuth();
     const navigate = useNavigate();
 
-    // Account Credentials
+    const [mode, setMode] = useState<'LOGIN' | 'SIGNUP'>('LOGIN');
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [showPassword, setShowPassword] = useState(false);
     const [fullName, setFullName] = useState('');
-    
-    // Default Role is 'student' as requested
-    const [role, setRole] = useState<'student' | 'supervisor'>('student');
+    const [role, setRole] = useState<Role>('student');
 
-    // Student specific fields
+    const [institution, setInstitution] = useState('Federal University of Petroleum Resources Effurun');
+    const [dept, setDept] = useState(DEPARTMENTS[0]);
+    const [customDept, setCustomDept] = useState('');
+
     const [studentId, setStudentId] = useState('');
     const [course, setCourse] = useState('');
     const [level, setLevel] = useState('400');
     const [gender, setGender] = useState('Male');
+    const [supervisorId, setSupervisorId] = useState('');
+    const [supervisors, setSupervisors] = useState<SupervisorSummary[]>([]);
 
-    // Department selection state (with custom fallback)
-    const [selectedDept, setSelectedDept] = useState('Computer Science');
-    const [customDept, setCustomDept] = useState('');
-
-    // Institution selection state (Searchable from Excel list + custom option)
-    const [institutionSearch, setInstitutionSearch] = useState('Federal University of Petroleum Resources Effurun');
-    const [customInst, setCustomInst] = useState('');
-    const [showInstDropdown, setShowInstDropdown] = useState(false);
-
-    // Supervisor Search & Selection
-    const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
-    const [selectedSupervisor, setSelectedSupervisor] = useState<Supervisor | null>(null);
-
-    // Supervisor specific fields
     const [title, setTitle] = useState('Dr.');
     const [officeLoc, setOfficeLoc] = useState('');
 
-    // Filter institutions from Excel data based on search input
-    const filteredInstitutions = useMemo(() => {
-        if (!institutionSearch.trim()) return institutionList.slice(0, 30);
-        const query = institutionSearch.toLowerCase();
-        const matches = institutionList.filter((inst: string) => inst.toLowerCase().includes(query));
-        return matches.length > 0 ? matches.slice(0, 30) : [];
-    }, [institutionSearch]);
-
-    // Fetch supervisors from backend API
     useEffect(() => {
-        const fetchSupervisors = async () => {
-            try {
-                const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-                const res = await fetch(`${backendUrl}/api/supervisors`);
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data && data.length > 0) {
-                        setSupervisors(data);
-                        return;
-                    }
-                }
-            } catch (err) {
-                console.warn('Backend supervisor fetch error, using fallbacks');
-            }
-            // Default fallback supervisors
-            setSupervisors([
-                { id: '1', full_name: 'Dr. O. A. Bode', email: 'bode@fupre.edu.ng', department: 'Computer Science', institution: 'FUPRE' },
-                { id: '2', full_name: 'Prof. E. K. Akpata', email: 'akpata@fupre.edu.ng', department: 'Electrical Eng', institution: 'FUPRE' },
-                { id: '3', full_name: 'Dr. Mrs. N. Nwosu', email: 'nwosu@fupre.edu.ng', department: 'Computer Science', institution: 'FUPRE' },
-            ]);
-        };
-        fetchSupervisors();
-    }, []);
+        if (mode !== 'SIGNUP' || role !== 'student') return;
+        api<SupervisorSummary[]>('/supervisors')
+            .then(setSupervisors)
+            .catch(() => setSupervisors([]));
+    }, [mode, role]);
 
-    // Get final department string
-    const getFinalDepartment = () => {
-        if (selectedDept === 'Other (Specify Custom Department)') {
-            return customDept.trim() || 'General';
-        }
-        return selectedDept;
+    if (!authLoading && profile) return <Navigate to={portalFor(profile.role)} replace />;
+
+    const switchMode = (next: 'LOGIN' | 'SIGNUP') => {
+        setMode(next);
+        setError('');
     };
 
-    // Get final institution string
-    const getFinalInstitution = () => {
-        if (institutionSearch === 'Other (Specify Custom Institution)') {
-            return customInst.trim() || 'FUPRE';
+    const signInAndEnter = async () => {
+        const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (authError) {
+            throw new Error(
+                authError.message === 'Invalid login credentials' ? 'Incorrect email or password.' : authError.message,
+            );
         }
-        return institutionSearch.trim() || 'Federal University of Petroleum Resources Effurun';
+        const me = await refresh();
+        if (!me) throw new Error('Signed in, but your profile could not be loaded. Is the backend running?');
+        navigate(portalFor(me.role), { replace: true });
     };
 
-    // 1. LOGIN HANDLER
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
+        setError('');
+        setBusy(true);
         try {
-            const { data, error } = await supabase.auth.signInWithPassword({
-                email: email.trim(),
-                password: password,
-            });
-
-            if (error) throw new Error(`Auth Failed: ${error.message}`);
-
-            const userRole = data.user?.user_metadata?.role || (email.includes('supervisor') ? 'supervisor' : 'student');
-
-            const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-            const syncRes = await fetch(`${backendUrl}/api/auth/sync-user`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email: data.user.email,
-                    full_name: data.user.user_metadata?.full_name || email.split('@')[0],
-                    role: userRole,
-                    ...data.user.user_metadata,
-                }),
-            });
-
-            if (!syncRes.ok) {
-                const errJson = await syncRes.json().catch(() => ({}));
-                throw new Error(`Database Error: ${errJson.message || 'Failed to sync user record with database.'}`);
-            }
-
-            const syncedUser = await syncRes.json();
-
-            localStorage.setItem('user_role', syncedUser.role || userRole);
-            localStorage.setItem('user_email', data.user.email || '');
-            localStorage.setItem('user_name', syncedUser.full_name || '');
-
-            if ((syncedUser.role || userRole) === 'supervisor') {
-                navigate('/supervisor/dashboard');
-            } else {
-                navigate('/student/dashboard');
-            }
-        } catch (err: any) {
-            alert("Login failed: " + err.message);
+            await signInAndEnter();
+        } catch (err) {
+            setError(errorMessage(err));
         } finally {
-            setLoading(false);
+            setBusy(false);
         }
     };
 
-    // 2. UNIFIED REAL-TIME SIGNUP HANDLER
-    const handleSingleFormSignup = async (e: React.FormEvent) => {
+    const handleSignup = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!email || !password || !fullName) {
-            alert('Please fill out all required credentials (name, email, password)');
-            return;
-        }
-
-        setLoading(true);
+        setError('');
+        setBusy(true);
         try {
-            const finalDept = getFinalDepartment();
-            const finalInst = getFinalInstitution();
-
-            const payload = {
-                email: email.trim(),
-                password: password,
-                full_name: fullName.trim(),
-                role: role,
-                department: finalDept,
-                institution: finalInst,
-                ...(role === 'student' ? {
-                    student_id: studentId.trim(),
-                    course: course.trim() || finalDept,
-                    level,
-                    gender,
-                    supervisor_email: selectedSupervisor?.email || '',
-                    supervisor_name: selectedSupervisor?.full_name || selectedSupervisor?.name || '',
-                    supervisor_id: selectedSupervisor?.id ? Number(selectedSupervisor.id) : null,
-                } : {
-                    title,
-                    office_loc: officeLoc.trim(),
-                })
-            };
-
-            const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-            const registerRes = await fetch(`${backendUrl}/api/auth/register`, {
+            const department = dept === OTHER ? customDept.trim() : dept;
+            await api('/auth/register', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
+                body: {
+                    email: email.trim(),
+                    password,
+                    full_name: fullName.trim(),
+                    role,
+                    department,
+                    institution: institution.trim(),
+                    ...(role === 'student'
+                        ? {
+                              student_id: studentId.trim(),
+                              course: course.trim() || department,
+                              level,
+                              gender,
+                              supervisor_id: supervisorId ? Number(supervisorId) : null,
+                          }
+                        : { title, office_loc: officeLoc.trim() }),
+                },
             });
-
-            if (!registerRes.ok) {
-                const errData = await registerRes.json().catch(() => ({}));
-                throw new Error(errData.message || 'Could not save profile to database.');
-            }
-
-            const resData = await registerRes.json();
-            const dbUser = resData.user || resData;
-
-            if (!dbUser || !dbUser.id) {
-                throw new Error('Database Error: User record was not persisted.');
-            }
-
-            localStorage.setItem('user_role', dbUser.role || role);
-            localStorage.setItem('user_email', email.trim());
-            localStorage.setItem('user_name', fullName.trim());
-
-            alert("Account created successfully and saved to Database!");
-            if ((dbUser.role || role) === 'supervisor') {
-                navigate('/supervisor/dashboard');
-            } else {
-                navigate('/student/dashboard');
-            }
-        } catch (err: any) {
-            alert("Signup failed: " + err.message);
-        } finally {
-            setLoading(false);
+            await signInAndEnter();
+        } catch (err) {
+            setError(errorMessage(err));
+            setBusy(false);
         }
     };
 
     return (
-        <div className="login-container">
-            {/* Left side - Dynamic Auth Form Container */}
-            <div className="login-left-side">
-                <div style={{ maxWidth: '480px', width: '100%', margin: '0 auto' }}>
-                    <h2 style={{ color: 'var(--primary-slate)', fontWeight: 800, marginBottom: '5px', fontSize: '2rem', letterSpacing: '-0.03em' }}>
-                        SIWES Portal
-                    </h2>
-                    <p style={{ color: '#6b7280', fontSize: '0.95rem', marginBottom: '20px', fontWeight: 500 }}>
-                        {mode === 'LOGIN' ? 'Sign in to manage your logbook records' : 'Create your account on the SIWES portal'}
+        <div className="auth">
+            <section className="auth-panel">
+                <div className="auth-box">
+                    <div className="brand brand-light">
+                        <span className="brand-mark">
+                            <Icon name="cap" size={20} />
+                        </span>
+                        <div>
+                            <strong>SIWES Logbook</strong>
+                            <small>Industrial training, documented</small>
+                        </div>
+                    </div>
+
+                    <h1>{mode === 'LOGIN' ? 'Welcome back' : 'Create your account'}</h1>
+                    <p className="muted">
+                        {mode === 'LOGIN'
+                            ? 'Sign in as a student or supervisor to continue.'
+                            : 'Students log their daily work. Supervisors review and guide.'}
                     </p>
 
-                    {/* Navigation Tabs between Login and Signup */}
-                    <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', background: '#f3f4f6', padding: '4px', borderRadius: '8px' }}>
-                        <button 
-                            type="button"
-                            onClick={() => setMode('LOGIN')}
-                            style={{
-                                flex: 1,
-                                padding: '8px',
-                                border: 'none',
-                                borderRadius: '6px',
-                                background: mode === 'LOGIN' ? '#ffffff' : 'transparent',
-                                fontWeight: 700,
-                                color: mode === 'LOGIN' ? '#0f172a' : '#64748b',
-                                boxShadow: mode === 'LOGIN' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            Sign In
+                    <div className="segmented" role="tablist">
+                        <button type="button" role="tab" aria-selected={mode === 'LOGIN'} className={mode === 'LOGIN' ? 'on' : ''} onClick={() => switchMode('LOGIN')}>
+                            Sign in
                         </button>
-                        <button 
-                            type="button"
-                            onClick={() => setMode('SIGNUP')}
-                            style={{
-                                flex: 1,
-                                padding: '8px',
-                                border: 'none',
-                                borderRadius: '6px',
-                                background: mode === 'SIGNUP' ? '#ffffff' : 'transparent',
-                                fontWeight: 700,
-                                color: mode === 'SIGNUP' ? '#0f172a' : '#64748b',
-                                boxShadow: mode === 'SIGNUP' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            Create Account
+                        <button type="button" role="tab" aria-selected={mode === 'SIGNUP'} className={mode === 'SIGNUP' ? 'on' : ''} onClick={() => switchMode('SIGNUP')}>
+                            Create account
                         </button>
                     </div>
 
-                    {/* MODE 1: LOGIN FORM */}
-                    {mode === 'LOGIN' && (
-                        <form onSubmit={handleLogin}>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Email Address</label>
-                                <input 
-                                    type="email" 
-                                    value={email} 
-                                    onChange={(e) => setEmail(e.target.value)} 
-                                    required 
-                                    placeholder="example@fupre.edu.ng"
-                                />
+                    {error && <Alert kind="error">{error}</Alert>}
+
+                    {mode === 'LOGIN' ? (
+                        <form onSubmit={handleLogin} className="stack">
+                            <div className="field">
+                                <label htmlFor="email">Email address</label>
+                                <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@institution.edu.ng" />
                             </div>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Password</label>
-                                <div style={{ position: 'relative', width: '100%' }}>
-                                    <input 
-                                        type={showPassword ? "text" : "password"} 
-                                        value={password} 
-                                        onChange={(e) => setPassword(e.target.value)} 
-                                        required 
-                                        placeholder="••••••••"
-                                        style={{ paddingRight: '40px', width: '100%' }}
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowPassword(!showPassword)}
-                                        style={{
-                                            position: 'absolute',
-                                            right: '12px',
-                                            top: '50%',
-                                            transform: 'translateY(-50%)',
-                                            background: 'none',
-                                            border: 'none',
-                                            cursor: 'pointer',
-                                            color: '#64748b',
-                                            padding: '4px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center'
-                                        }}
-                                        title={showPassword ? "Hide password" : "Show password"}
-                                    >
-                                        {showPassword ? (
-                                            /* Eye Slash Icon (Hide) */
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                                                <line x1="1" y1="1" x2="23" y2="23"></line>
-                                            </svg>
-                                        ) : (
-                                            /* Eye Open Icon (Show) */
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                                <circle cx="12" cy="12" r="3"></circle>
-                                            </svg>
-                                        )}
-                                    </button>
-                                </div>
+                            <div className="field">
+                                <label htmlFor="password">Password</label>
+                                <PasswordInput value={password} onChange={setPassword} autoComplete="current-password" placeholder="Your password" />
                             </div>
-                            <button 
-                                type="submit" 
-                                className="btn btn-primary" 
-                                disabled={loading}
-                                style={{ width: '100%', marginTop: '15px', padding: '14px' }}
-                            >
-                                {loading ? 'Signing In & Verifying DB...' : 'Sign In'}
+                            <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
+                                {busy ? 'Signing in…' : 'Sign in'}
                             </button>
                         </form>
-                    )}
-
-                    {/* MODE 2: REAL-TIME SINGLE SIGNUP FORM */}
-                    {mode === 'SIGNUP' && (
-                        <form onSubmit={handleSingleFormSignup} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                            {/* REAL-TIME ROLE TOGGLE (Default is Student) */}
-                            <div>
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
-                                    I am registering as:
-                                </label>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                                    <div 
-                                        onClick={() => setRole('student')}
-                                        className={`role-card ${role === 'student' ? 'selected' : ''}`}
-                                        style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px', textAlign: 'left' }}
-                                    >
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: role === 'student' ? '#2563eb' : '#64748b' }}>
-                                            {/* Academic / Student Cap Icon */}
-                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
-                                                <path d="M6 12v5c3 3 9 3 12 0v-5"></path>
-                                            </svg>
-                                        </div>
-                                        <div>
-                                            <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#0f172a' }}>Student</div>
-                                            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Log daily entries</div>
-                                        </div>
-                                    </div>
-                                    <div 
-                                        onClick={() => setRole('supervisor')}
-                                        className={`role-card ${role === 'supervisor' ? 'selected' : ''}`}
-                                        style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px', textAlign: 'left' }}
-                                    >
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: role === 'supervisor' ? '#2563eb' : '#64748b' }}>
-                                            {/* User / Teacher Badge Icon */}
-                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                                                <circle cx="12" cy="7" r="4"></circle>
-                                            </svg>
-                                        </div>
-                                        <div>
-                                            <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#0f172a' }}>Supervisor</div>
-                                            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Oversee logbooks</div>
-                                        </div>
-                                    </div>
-                                </div>
+                    ) : (
+                        <form onSubmit={handleSignup} className="stack">
+                            <div className="role-pick">
+                                <button type="button" className={`role-card ${role === 'student' ? 'on' : ''}`} onClick={() => setRole('student')}>
+                                    <Icon name="cap" size={22} />
+                                    <strong>Student</strong>
+                                    <small>Log daily work</small>
+                                </button>
+                                <button type="button" className={`role-card ${role === 'supervisor' ? 'on' : ''}`} onClick={() => setRole('supervisor')}>
+                                    <Icon name="users" size={22} />
+                                    <strong>Supervisor</strong>
+                                    <small>Review logbooks</small>
+                                </button>
                             </div>
 
-                            {/* CREDENTIALS */}
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Full Name</label>
-                                <input 
-                                    type="text" 
-                                    value={fullName} 
-                                    onChange={(e) => setFullName(e.target.value)} 
-                                    required 
-                                    placeholder="John Doe"
-                                />
+                            <div className="field">
+                                <label htmlFor="name">Full name</label>
+                                <input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} required autoComplete="name" placeholder="e.g. Ada Okafor" />
                             </div>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Email Address</label>
-                                <input 
-                                    type="email" 
-                                    value={email} 
-                                    onChange={(e) => setEmail(e.target.value)} 
-                                    required 
-                                    placeholder="example@fupre.edu.ng"
-                                />
+                            <div className="field">
+                                <label htmlFor="email2">Email address</label>
+                                <input id="email2" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@institution.edu.ng" />
                             </div>
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Password</label>
-                                <div style={{ position: 'relative', width: '100%' }}>
-                                    <input 
-                                        type={showPassword ? "text" : "password"} 
-                                        value={password} 
-                                        onChange={(e) => setPassword(e.target.value)} 
-                                        required 
-                                        placeholder="••••••••"
-                                        style={{ paddingRight: '40px', width: '100%' }}
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowPassword(!showPassword)}
-                                        style={{
-                                            position: 'absolute',
-                                            right: '12px',
-                                            top: '50%',
-                                            transform: 'translateY(-50%)',
-                                            background: 'none',
-                                            border: 'none',
-                                            cursor: 'pointer',
-                                            color: '#64748b',
-                                            padding: '4px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center'
-                                        }}
-                                        title={showPassword ? "Hide password" : "Show password"}
-                                    >
-                                        {showPassword ? (
-                                            /* Eye Slash Icon (Hide) */
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                                                <line x1="1" y1="1" x2="23" y2="23"></line>
-                                            </svg>
-                                        ) : (
-                                            /* Eye Open Icon (Show) */
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                                <circle cx="12" cy="12" r="3"></circle>
-                                            </svg>
-                                        )}
-                                    </button>
-                                </div>
+                            <div className="field">
+                                <label htmlFor="password2">Password</label>
+                                <PasswordInput value={password} onChange={setPassword} autoComplete="new-password" />
                             </div>
 
-                            {/* SEARCHABLE / DROPDOWN DEPARTMENT */}
-                            <div className="form-group">
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Department</label>
-                                <select 
-                                    value={selectedDept}
-                                    onChange={(e) => setSelectedDept(e.target.value)}
-                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                                >
-                                    {POPULAR_DEPARTMENTS.map(dept => (
-                                        <option key={dept} value={dept}>{dept}</option>
+                            <div className="field">
+                                <label htmlFor="inst">Institution</label>
+                                <input id="inst" list="institutions" value={institution} onChange={(e) => setInstitution(e.target.value)} required placeholder="Search or type your institution" />
+                                <datalist id="institutions">
+                                    {(institutionList as string[]).map((i) => (
+                                        <option key={i} value={i} />
                                     ))}
+                                </datalist>
+                            </div>
+                            <div className="field">
+                                <label htmlFor="dept">Department</label>
+                                <select id="dept" value={dept} onChange={(e) => setDept(e.target.value)}>
+                                    {DEPARTMENTS.map((d) => (
+                                        <option key={d}>{d}</option>
+                                    ))}
+                                    <option value={OTHER}>Other…</option>
                                 </select>
-
-                                {/* Custom department text field if "Other" is selected */}
-                                {selectedDept === 'Other (Specify Custom Department)' && (
-                                    <input 
-                                        type="text"
-                                        value={customDept}
-                                        onChange={(e) => setCustomDept(e.target.value)}
-                                        placeholder="Type custom department name..."
-                                        style={{ marginTop: '8px' }}
-                                        required
-                                    />
+                                {dept === OTHER && (
+                                    <input value={customDept} onChange={(e) => setCustomDept(e.target.value)} required placeholder="Type your department" className="mt" />
                                 )}
                             </div>
 
-                            {/* SEARCHABLE INSTITUTION DROPDOWN (Loaded from Nigerian Universities & Polytechnics Excel file) */}
-                            <div className="form-group" style={{ position: 'relative' }}>
-                                <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Institution / University / Polytechnic</label>
-                                <input 
-                                    type="text" 
-                                    value={institutionSearch}
-                                    onChange={(e) => {
-                                        setInstitutionSearch(e.target.value);
-                                        setShowInstDropdown(true);
-                                    }}
-                                    onFocus={() => setShowInstDropdown(true)}
-                                    placeholder="Type or search university/polytechnic..."
-                                    required
-                                />
-
-                                {/* Search dropdown list from Excel */}
-                                {showInstDropdown && (
-                                    <div 
-                                        style={{
-                                            position: 'absolute',
-                                            top: '100%',
-                                            left: 0,
-                                            right: 0,
-                                            maxHeight: '180px',
-                                            overflowY: 'auto',
-                                            background: '#ffffff',
-                                            border: '1px solid #cbd5e1',
-                                            borderRadius: '8px',
-                                            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
-                                            zIndex: 10,
-                                            marginTop: '4px'
-                                        }}
-                                    >
-                                        {filteredInstitutions.length > 0 ? (
-                                            filteredInstitutions.map((inst: string, idx: number) => (
-                                                <div 
-                                                    key={idx}
-                                                    onClick={() => {
-                                                        setInstitutionSearch(inst);
-                                                        setShowInstDropdown(false);
-                                                    }}
-                                                    style={{
-                                                        padding: '10px 12px',
-                                                        fontSize: '0.825rem',
-                                                        cursor: 'pointer',
-                                                        borderBottom: '1px solid #f1f5f9',
-                                                        color: '#1e293b',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        gap: '8px'
-                                                    }}
-                                                    className="institution-item"
-                                                >
-                                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#64748b' }}>
-                                                        <path d="M3 21h18M3 7l9-4 9 4M4 10h16M6 10v8M10 10v8M14 10v8M18 10v8"></path>
-                                                    </svg>
-                                                    {inst}
-                                                </div>
-                                            ))
-                                        ) : (
-                                            <div 
-                                                onClick={() => {
-                                                    setInstitutionSearch('Other (Specify Custom Institution)');
-                                                    setShowInstDropdown(false);
-                                                }}
-                                                style={{ padding: '10px 12px', fontSize: '0.825rem', color: '#2563eb', cursor: 'pointer', fontWeight: 'bold' }}
-                                            >
-                                                + Other (Specify custom institution)
-                                            </div>
-                                        )}
-                                        <div 
-                                            onClick={() => {
-                                                setInstitutionSearch('Other (Specify Custom Institution)');
-                                                setShowInstDropdown(false);
-                                            }}
-                                            style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#2563eb', background: '#eff6ff', cursor: 'pointer', textAlign: 'center', fontWeight: 'bold' }}
-                                        >
-                                            Can't find yours? Click here to type custom institution
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Custom institution text field if "Other" is selected */}
-                                {institutionSearch === 'Other (Specify Custom Institution)' && (
-                                    <input 
-                                        type="text"
-                                        value={customInst}
-                                        onChange={(e) => setCustomInst(e.target.value)}
-                                        placeholder="Type custom institution name..."
-                                        style={{ marginTop: '8px' }}
-                                        required
-                                    />
-                                )}
-                            </div>
-
-                            {/* REAL-TIME ROLE-SPECIFIC FIELDS */}
                             {role === 'student' ? (
-                                /* STUDENT REAL-TIME FIELDS */
                                 <>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                                        <div className="form-group">
-                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Matric / Student ID</label>
-                                            <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="CPN/2020/1042" required />
+                                    <div className="row2">
+                                        <div className="field">
+                                            <label htmlFor="mat">Matric number</label>
+                                            <input id="mat" value={studentId} onChange={(e) => setStudentId(e.target.value)} required placeholder="CPN/2020/1042" />
                                         </div>
-                                        <div className="form-group">
-                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Course of Study</label>
-                                            <input type="text" value={course} onChange={(e) => setCourse(e.target.value)} placeholder="e.g. Software Engineering" required />
+                                        <div className="field">
+                                            <label htmlFor="course">Course of study</label>
+                                            <input id="course" value={course} onChange={(e) => setCourse(e.target.value)} required placeholder="Software Engineering" />
                                         </div>
                                     </div>
-
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                                        <div className="form-group">
-                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Level</label>
-                                            <select value={level} onChange={(e) => setLevel(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                                    <div className="row2">
+                                        <div className="field">
+                                            <label htmlFor="level">Level</label>
+                                            <select id="level" value={level} onChange={(e) => setLevel(e.target.value)}>
+                                                <option value="200">200 Level</option>
                                                 <option value="300">300 Level</option>
                                                 <option value="400">400 Level</option>
                                                 <option value="500">500 Level</option>
                                             </select>
                                         </div>
-                                        <div className="form-group">
-                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Gender</label>
-                                            <select value={gender} onChange={(e) => setGender(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                                                <option value="Male">Male</option>
-                                                <option value="Female">Female</option>
+                                        <div className="field">
+                                            <label htmlFor="gender">Gender</label>
+                                            <select id="gender" value={gender} onChange={(e) => setGender(e.target.value)}>
+                                                <option>Male</option>
+                                                <option>Female</option>
                                             </select>
                                         </div>
                                     </div>
-
-                                    <div className="form-group">
-                                        <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Assigned Academic Supervisor</label>
-                                        <select 
-                                            onChange={(e) => {
-                                                const selected = supervisors.find(s => String(s.id) === e.target.value || s.email === e.target.value);
-                                                setSelectedSupervisor(selected || null);
-                                            }}
-                                            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                                        >
-                                            <option value="">Select a Supervisor...</option>
-                                            {supervisors.map(sup => (
-                                                <option key={sup.id} value={sup.email}>
-                                                    {sup.full_name || sup.name || sup.email} ({sup.department || 'Staff'})
+                                    <div className="field">
+                                        <label htmlFor="sup">Your SIWES supervisor</label>
+                                        <select id="sup" value={supervisorId} onChange={(e) => setSupervisorId(e.target.value)}>
+                                            <option value="">Choose later in My Profile</option>
+                                            {supervisors.map((s) => (
+                                                <option key={s.id} value={s.id}>
+                                                    {[s.title, s.full_name].filter(Boolean).join(' ')}
+                                                    {s.department ? ` — ${s.department}` : ''}
                                                 </option>
                                             ))}
                                         </select>
+                                        {supervisors.length === 0 && (
+                                            <span className="hint">No supervisors have registered yet. You can pick one later.</span>
+                                        )}
                                     </div>
                                 </>
                             ) : (
-                                /* SUPERVISOR REAL-TIME FIELDS */
-                                <>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                                        <div className="form-group">
-                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Title</label>
-                                            <select value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                                                <option value="Dr.">Dr.</option>
-                                                <option value="Prof.">Prof.</option>
-                                                <option value="Mr.">Mr.</option>
-                                                <option value="Mrs.">Mrs.</option>
-                                                <option value="Engr.">Engr.</option>
-                                            </select>
-                                        </div>
-                                        <div className="form-group">
-                                            <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>Office / Building Location</label>
-                                            <input type="text" value={officeLoc} onChange={(e) => setOfficeLoc(e.target.value)} placeholder="Block B, Room 204" required />
-                                        </div>
+                                <div className="row2">
+                                    <div className="field">
+                                        <label htmlFor="title">Title</label>
+                                        <select id="title" value={title} onChange={(e) => setTitle(e.target.value)}>
+                                            {['Dr.', 'Prof.', 'Engr.', 'Mr.', 'Mrs.', 'Ms.'].map((t) => (
+                                                <option key={t}>{t}</option>
+                                            ))}
+                                        </select>
                                     </div>
-                                </>
+                                    <div className="field">
+                                        <label htmlFor="office">Office location</label>
+                                        <input id="office" value={officeLoc} onChange={(e) => setOfficeLoc(e.target.value)} placeholder="Block B, Room 204" />
+                                    </div>
+                                </div>
                             )}
 
-                            <button 
-                                type="submit" 
-                                disabled={loading}
-                                className="btn btn-primary"
-                                style={{ width: '100%', marginTop: '10px', padding: '14px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 800 }}
-                            >
-                                {loading ? 'Creating Account & Registering...' : 'Create Account & Sign In'}
+                            <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
+                                {busy ? 'Creating account…' : 'Create account'}
                             </button>
                         </form>
                     )}
                 </div>
-            </div>
+            </section>
 
-            {/* Right side - Cover Image */}
-            <div className="login-right-side" style={{ backgroundImage: `url(${coverImg})` }}>
-                <div className="login-cover-content">
-                    <h2>SIWES Logbook Portal</h2>
-                    <p>
-                        A digital environment to document your daily work log entries, verify GPS coordinates, upload proof of work done, and maintain interactive contact with your supervisor.
-                    </p>
+            <section className="auth-hero" style={{ backgroundImage: `url(${coverImg})` }}>
+                <div className="auth-hero-text">
+                    <h2>Every day of your training, on the record.</h2>
+                    <ul>
+                        <li><Icon name="pin" /> GPS-stamped daily entries</li>
+                        <li><Icon name="check-circle" /> Supervisor review and feedback</li>
+                        <li><Icon name="message" /> Direct line to your supervisor</li>
+                    </ul>
                 </div>
-            </div>
+            </section>
         </div>
     );
 };

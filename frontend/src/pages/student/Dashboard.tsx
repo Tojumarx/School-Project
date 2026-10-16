@@ -1,317 +1,380 @@
-import React, { useState, useEffect } from 'react';
-import { supabase, BACKEND_URL } from '../../supabaseClient';
-import './Dashboard.css';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { api, errorMessage } from '../../lib/api';
+import { supabase } from '../../supabaseClient';
+import { useAuth } from '../../lib/auth';
+import { formatDate, startOfWeekStr, todayStr } from '../../lib/dates';
+import type { Entry } from '../../lib/types';
+import { Alert, Avatar, Icon, MonthCalendar, Stat, StatusBadge, type DayMark } from '../../components/ui';
+import banner from '../../assets/student-banner.jpg';
 
-interface StudentProfile {
-    fullName: string;
-    email: string;
-    gender?: string;
-    dob?: string;
-    avatar?: string;
+const PHOTO_BUCKET = 'log-photos';
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+type GeoState = 'locating' | 'ok' | 'denied' | 'unsupported';
+
+interface Prefill {
+    date?: string;
+    description?: string;
+    image_url?: string | null;
 }
 
+const greeting = () => {
+    const h = new Date().getHours();
+    return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+};
+
 export const StudentDashboard: React.FC = () => {
-    const [profile, setProfile] = useState<StudentProfile | null>(null);
-    const [yesterdayStatus, setYesterdayStatus] = useState<string>('Loading...');
-    const [yesterdayClass, setYesterdayClass] = useState<string>('status-Rejected');
-    const [weeklyCount, setWeeklyCount] = useState<number>(0);
-    const [unverifiedCount, setUnverifiedCount] = useState<number>(0);
-    
-    // Form States
-    const [logDate, setLogDate] = useState<string>('');
-    const [photoUrl, setPhotoUrl] = useState<string>('');
-    const [activity, setActivity] = useState<string>('');
-    const [lat, setLat] = useState<number | null>(null);
-    const [lng, setLng] = useState<number | null>(null);
-    const [submitting, setSubmitting] = useState<boolean>(false);
+    const { profile } = useAuth();
+    const location = useLocation();
+    const navigate = useNavigate();
+    const prefill = (location.state as Prefill | null) || null;
 
-    // Heatmap Maps
-    const [loggedDatesMap, setLoggedDatesMap] = useState<Record<string, string>>({});
+    const [entries, setEntries] = useState<Entry[]>([]);
+    const [loadingEntries, setLoadingEntries] = useState(true);
 
-    useEffect(() => {
-        // Geolocation hook
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-                pos => {
-                    setLat(pos.coords.latitude);
-                    setLng(pos.coords.longitude);
-                },
-                err => console.warn("GPS Location block unavailable: ", err),
-                { enableHighAccuracy: true }
-            );
+    const [date, setDate] = useState(prefill?.date || todayStr());
+    const [description, setDescription] = useState(prefill?.description || '');
+    const [imageUrl, setImageUrl] = useState(prefill?.image_url || '');
+    const [photoFile, setPhotoFile] = useState<File | null>(null);
+    const [photoPreview, setPhotoPreview] = useState('');
+    const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+    const [geo, setGeo] = useState<GeoState>('locating');
+
+    const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
+
+    const loadEntries = useCallback(async () => {
+        try {
+            setEntries(await api<Entry[]>('/entries'));
+        } catch (err) {
+            setError(errorMessage(err));
+        } finally {
+            setLoadingEntries(false);
         }
-
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session?.user) {
-                const user = session.user;
-                const email = user.email!;
-
-                setProfile({
-                    fullName: user.user_metadata?.full_name || email.split('@')[0],
-                    email: email,
-                    gender: user.user_metadata?.gender,
-                    dob: user.user_metadata?.dob,
-                    avatar: user.user_metadata?.avatar_url
-                });
-
-                // Fetch entries from NestJS Backend
-                fetch(`${BACKEND_URL}/api/entries?studentEmail=${encodeURIComponent(email)}`)
-                    .then(res => res.json())
-                    .then(entries => {
-                        const tempMap: Record<string, string> = {};
-                        let unverified = 0;
-                        let thisWeek = 0;
-                        let yStatus = "No Log Filed";
-                        let yClass = "status-Rejected";
-
-                        const yesterdayStr = getFormattedOffsetDate(-1);
-                        const startOfWeek = new Date();
-                        const today = new Date();
-                        startOfWeek.setDate(today.getDate() - today.getDay());
-                        startOfWeek.setHours(0, 0, 0, 0);
-
-                        entries.forEach((e: any) => {
-                            if (e.date) {
-                                tempMap[e.date] = e.status;
-
-                                if (e.date === yesterdayStr) {
-                                    yStatus = e.status;
-                                    yClass = `status-${e.status}`;
-                                }
-                            }
-                            if (e.status === "Pending" || e.status === "pending") unverified++;
-
-                            if (e.created_at) {
-                                const tDate = new Date(e.created_at);
-                                if (tDate >= startOfWeek) {
-                                    thisWeek++;
-                                }
-                            }
-                        });
-
-                        setLoggedDatesMap(tempMap);
-                        setYesterdayStatus(yStatus);
-                        setYesterdayClass(yClass);
-                        setWeeklyCount(thisWeek);
-                        setUnverifiedCount(unverified);
-                    })
-                    .catch(err => console.error("Error fetching logs: ", err));
-            }
-        });
     }, []);
 
-    const getFormattedOffsetDate = (offset: number): string => {
-        const d = new Date();
-        d.setDate(d.getDate() + offset);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const locate = useCallback(() => {
+        if (!navigator.geolocation) {
+            setGeo('unsupported');
+            return;
+        }
+        setGeo('locating');
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                setGeo('ok');
+            },
+            () => setGeo('denied'),
+            { enableHighAccuracy: true, timeout: 15000 },
+        );
+    }, []);
+
+    useEffect(() => {
+        loadEntries();
+        locate();
+    }, [loadEntries, locate]);
+
+    // Drop the router state so a refresh doesn't re-apply an old prefill
+    useEffect(() => {
+        if (prefill) navigate(location.pathname, { replace: true, state: null });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
+        if (!photoFile) {
+            setPhotoPreview('');
+            return;
+        }
+        const url = URL.createObjectURL(photoFile);
+        setPhotoPreview(url);
+        return () => URL.revokeObjectURL(url);
+    }, [photoFile]);
+
+    const pickPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        if (!PHOTO_TYPES.includes(file.type)) {
+            setError('Photos must be JPG, PNG or WebP images.');
+            return;
+        }
+        if (file.size > MAX_PHOTO_BYTES) {
+            setError('That photo is larger than 5 MB. Choose a smaller one.');
+            return;
+        }
+        setError('');
+        setPhotoFile(file);
     };
 
-    const handleFormSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const session = (await supabase.auth.getSession()).data.session;
-        if (!session?.user) return;
+    const removePhoto = () => {
+        setPhotoFile(null);
+        setImageUrl('');
+    };
 
-        if (lat === null || lng === null) {
-            alert("Please allow location tracking access to verify this log.");
+    const uploadPhoto = async (file: File): Promise<string> => {
+        const { data } = await supabase.auth.getUser();
+        if (!data.user) throw new Error('Your session expired. Please sign in again.');
+        const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+        const path = `${data.user.id}/${Date.now()}.${ext}`;
+        const { error: upErr } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, { contentType: file.type });
+        if (upErr) throw new Error(`Photo upload failed: ${upErr.message}`);
+        return supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
+    };
+
+    const stats = useMemo(() => {
+        const weekStart = startOfWeekStr();
+        return {
+            week: entries.filter((e) => e.date >= weekStart).length,
+            pending: entries.filter((e) => e.status === 'Pending').length,
+            approved: entries.filter((e) => e.status === 'Approved').length,
+            total: entries.length,
+        };
+    }, [entries]);
+
+    const rejected = entries.filter((e) => e.status === 'Rejected');
+    const marks = useMemo(() => {
+        const m: Record<string, DayMark> = {};
+        entries.forEach((e) => (m[e.date] = e.status));
+        return m;
+    }, [entries]);
+
+    const existingForDate = entries.find((e) => e.date === date);
+    const blocked = !!existingForDate && existingForDate.status !== 'Rejected';
+    const resubmitting = existingForDate?.status === 'Rejected';
+
+    const startFix = (e: Entry) => {
+        setDate(e.date);
+        setDescription(e.description);
+        setImageUrl(e.image_url || '');
+        setSuccess('');
+        setError('');
+        document.getElementById('log-form')?.scrollIntoView();
+    };
+
+    const handleSubmit = async (ev: React.FormEvent) => {
+        ev.preventDefault();
+        setError('');
+        setSuccess('');
+
+        if (!coords) {
+            setError('Location is required to verify your log. Allow location access in your browser, then tap "Try again".');
             return;
         }
 
         setSubmitting(true);
         try {
-            const response = await fetch(`${BACKEND_URL}/api/entries`, {
+            const finalImage = photoFile ? await uploadPhoto(photoFile) : imageUrl.trim() || null;
+            await api('/entries', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    student_email: session.user.email,
-                    student_name: profile?.fullName || session.user.email,
-                    date: logDate,
-                    description: activity.trim(),
-                    image_url: photoUrl.trim(),
-                    location: { latitude: lat, longitude: lng },
-                    status: "Pending"
-                })
+                body: {
+                    date,
+                    description: description.trim(),
+                    image_url: finalImage,
+                    latitude: coords.lat,
+                    longitude: coords.lng,
+                },
             });
-
-            if (!response.ok) throw new Error("Failed to save entry");
-
-            alert("Log saved successfully!");
-            setLogDate('');
-            setPhotoUrl('');
-            setActivity('');
-            window.location.reload();
-        } catch (err: any) {
-            alert("Submission error: " + err.message);
+            setSuccess(resubmitting ? 'Corrected log resubmitted for review.' : 'Log saved and sent to your supervisor for review.');
+            setDescription('');
+            setImageUrl('');
+            setPhotoFile(null);
+            setDate(todayStr());
+            await loadEntries();
+        } catch (err) {
+            setError(errorMessage(err));
         } finally {
             setSubmitting(false);
         }
     };
 
-    // Calendar Heatmap rendering helper
-    const renderCalendarDays = () => {
-        const today = new Date();
-        const year = today.getFullYear();
-        const month = today.getMonth();
-
-        const firstDayIndex = new Date(year, month, 1).getDay();
-        const totalDays = new Date(year, month + 1, 0).getDate();
-
-        const days: React.ReactNode[] = [];
-
-        // Fillers
-        for (let i = 0; i < firstDayIndex; i++) {
-            days.push(<div key={`empty-${i}`} className="calendar-day day-empty"></div>);
-        }
-
-        // Days
-        for (let day = 1; day <= totalDays; day++) {
-            const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const logStatus = loggedDatesMap[dayStr];
-            let statusClass = "";
-
-            if (logStatus) {
-                statusClass = `day-logged-${logStatus}`;
-            }
-
-            days.push(
-                <div 
-                    key={`day-${day}`} 
-                    className={`calendar-day ${statusClass}`} 
-                    title={logStatus ? `Status: ${logStatus}` : 'No Entry Submitted'}
-                >
-                    {day}
-                </div>
-            );
-        }
-
-        return days;
-    };
-
-    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    const currentMonthLabel = `${monthNames[new Date().getMonth()]} ${new Date().getFullYear()}`;
+    const supervisor = profile?.supervisor;
 
     return (
-        <div className="animated-fade-in">
-            {/* Student Profile Overview Card */}
-            <div className="card" style={{ display: 'flex', gap: '24px', alignItems: 'center', flexWrap: 'wrap', background: 'linear-gradient(to right, #ffffff, #f8fafc)' }}>
-                <div style={{ width: '80px', height: '80px', borderRadius: '50%', overflow: 'hidden', border: '3px solid var(--accent-sky)', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem', color: '#64748b' }}>
-                    {profile?.avatar ? (
-                        <img 
-                            src={profile.avatar} 
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                            onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/150/f1f5f9/64748b?text=Student' }} 
-                            alt="Student avatar" 
-                        />
-                    ) : (
-                        "👤"
-                    )}
-                </div>
-                <div style={{ flex: 1 }}>
-                    <h2 style={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
-                        {profile ? profile.fullName : "Loading Student Details..."}
-                    </h2>
-                    <p style={{ color: '#64748b', fontWeight: 500, fontSize: '0.95rem' }}>
-                        {profile ? profile.email : "Checking registration info..."}
+        <>
+            <section className="banner" style={{ backgroundImage: `url(${banner})` }}>
+                <div className="banner-text">
+                    <small>{formatDate(todayStr())}</small>
+                    <h1>
+                        {greeting()}, {profile?.full_name.split(' ')[0]}
+                    </h1>
+                    <p>
+                        {[profile?.course, profile?.level ? `${profile.level} Level` : null, profile?.institution]
+                            .filter(Boolean)
+                            .join(' · ')}
                     </p>
-                    <div style={{ display: 'flex', gap: '15px', marginTop: '10px', fontSize: '0.85rem', fontWeight: 600 }}>
-                        {profile?.gender && (
-                            <span style={{ background: '#f1f5f9', padding: '4px 10px', borderRadius: '12px' }}>
-                                Gender: {profile.gender}
-                            </span>
-                        )}
-                        {profile?.dob && (
-                            <span style={{ background: '#f1f5f9', padding: '4px 10px', borderRadius: '12px' }}>
-                                DOB: {profile.dob}
-                            </span>
-                        )}
-                    </div>
                 </div>
+            </section>
+
+            <div className="stats">
+                <Stat icon="calendar" tone="brand" label="Logged this week" value={stats.week} />
+                <Stat icon="clock" tone="amber" label="Awaiting review" value={stats.pending} />
+                <Stat icon="check-circle" tone="green" label="Approved" value={stats.approved} />
+                <Stat icon="book" tone="slate" label="Total logs" value={stats.total} />
             </div>
 
-            {/* Metrics Grid */}
-            <div className="metrics-grid">
-                <div className="metric-card" style={{ borderLeft: '4px solid var(--accent-blue)' }}>
-                    <div className="metric-data">
-                        <h4>Yesterday's Entry</h4>
-                        <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#64748b', marginTop: '4px' }}>
-                            <span className={`status-badge ${yesterdayClass}`}>{yesterdayStatus}</span>
-                        </div>
+            {rejected.length > 0 && (
+                <section className="card attention">
+                    <div className="card-head">
+                        <h2>
+                            <Icon name="alert" /> Needs your attention
+                        </h2>
+                        <span className="muted">{rejected.length} rejected</span>
                     </div>
-                    <div className="metric-icon" style={{ background: '#f1f5f9' }}>🕒</div>
-                </div>
-                <div className="metric-card" style={{ borderLeft: '4px solid var(--status-approved)' }}>
-                    <div className="metric-data">
-                        <h4>Logged This Week</h4>
-                        <p>{weeklyCount}</p>
-                    </div>
-                    <div className="metric-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--status-approved)' }}>📅</div>
-                </div>
-                <div className="metric-card" style={{ borderLeft: '4px solid var(--status-pending)' }}>
-                    <div className="metric-data">
-                        <h4>Unverified Pipeline</h4>
-                        <p>{unverifiedCount}</p>
-                    </div>
-                    <div className="metric-icon" style={{ background: 'rgba(245, 158, 11, 0.1)', color: 'var(--status-pending)' }}>⏳</div>
-                </div>
-            </div>
+                    <ul className="plain-list">
+                        {rejected.map((e) => (
+                            <li key={e.id} className="attention-item">
+                                <div>
+                                    <strong>{formatDate(e.date)}</strong>
+                                    <p className="feedback">
+                                        <Icon name="message" size={14} /> {e.supervisor_comment || 'No comment left.'}
+                                    </p>
+                                </div>
+                                <button className="btn btn-secondary btn-sm" onClick={() => startFix(e)}>
+                                    Fix and resubmit
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                </section>
+            )}
 
-            <div className="dashboard-grid">
-                {/* Left Workspace: Entry Form Panel */}
-                <div className="card">
-                    <h3 className="card-title">📝 Daily Log Submission</h3>
-                    <form onSubmit={handleFormSubmit}>
-                        <div className="form-group">
-                            <label>Select Work Date</label>
-                            <input 
-                                type="date" 
-                                value={logDate} 
-                                onChange={(e) => setLogDate(e.target.value)} 
-                                required 
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label>Attachment URL Link (Proof)</label>
-                            <input 
-                                type="text" 
-                                value={photoUrl} 
-                                onChange={(e) => setPhotoUrl(e.target.value)} 
-                                placeholder="Paste ImgBB link or hosted screenshot" 
-                                required 
-                            />
+            <div className="layout-2">
+                <section className="card" id="log-form">
+                    <div className="card-head">
+                        <h2>{resubmitting ? 'Resubmit corrected log' : 'Log your work'}</h2>
+                    </div>
+
+                    {!loadingEntries && !profile?.supervisor_id && (
+                        <Alert kind="info">
+                            You haven't chosen a supervisor yet, so nobody can review your logs. <Link to="/student/settings">Choose one in My Profile</Link>.
+                        </Alert>
+                    )}
+                    {error && <Alert kind="error">{error}</Alert>}
+                    {success && <Alert kind="success">{success}</Alert>}
+
+                    <form onSubmit={handleSubmit} className="stack">
+                        <div className="field">
+                            <label htmlFor="date">Work date</label>
+                            <input id="date" type="date" value={date} max={todayStr()} onChange={(e) => setDate(e.target.value)} required />
+                            {blocked && (
+                                <span className="hint warn">
+                                    You already logged this date ({existingForDate?.status.toLowerCase()}). Pick a different date.
+                                </span>
+                            )}
                         </div>
 
-                        <div className="form-group">
-                            <label>Activity Summary & Work Done</label>
-                            <textarea 
-                                value={activity} 
-                                onChange={(e) => setActivity(e.target.value)} 
-                                rows={6} 
-                                placeholder="Document specific tasks, setups configured, or logic developed today..." 
-                                required 
-                            ></textarea>
+                        <div className="field">
+                            <label htmlFor="activity">What did you do?</label>
+                            <textarea
+                                id="activity"
+                                rows={7}
+                                value={description}
+                                onChange={(e) => setDescription(e.target.value)}
+                                required
+                                minLength={10}
+                                placeholder="Describe the tasks you handled, tools you used and what you learned today."
+                            />
+                            <span className="hint">{description.trim().length} characters · minimum 10</span>
                         </div>
-                        
-                        <button type="submit" className="btn btn-accent" disabled={submitting}>
-                            {submitting ? 'Saving Log Entry...' : 'Save Log Entry'}
+
+                        <div className="field">
+                            <label htmlFor="proof">
+                                Photo of your work <span className="optional">optional</span>
+                            </label>
+                            {photoPreview || imageUrl ? (
+                                <div className="photo-preview">
+                                    <img src={photoPreview || imageUrl} alt="Selected work" />
+                                    <button type="button" className="btn btn-secondary btn-sm" onClick={removePhoto}>
+                                        <Icon name="x" size={14} /> Remove
+                                    </button>
+                                </div>
+                            ) : (
+                                <label htmlFor="proof" className="photo-drop">
+                                    <Icon name="image" size={22} />
+                                    <span>Choose a photo</span>
+                                    <small>JPG, PNG or WebP, up to 5 MB</small>
+                                </label>
+                            )}
+                            <input id="proof" type="file" accept="image/jpeg,image/png,image/webp" onChange={pickPhoto} className="visually-hidden" />
+                        </div>
+
+                        <div className={`geo geo-${geo}`}>
+                            <Icon name="pin" />
+                            <div className="geo-text">
+                                {geo === 'locating' && <span>Finding your location…</span>}
+                                {geo === 'ok' && coords && (
+                                    <span>
+                                        Location captured <small>({coords.lat.toFixed(4)}, {coords.lng.toFixed(4)})</small>
+                                    </span>
+                                )}
+                                {geo === 'denied' && <span>Location blocked. Allow access in your browser settings.</span>}
+                                {geo === 'unsupported' && <span>This browser can't share location.</span>}
+                            </div>
+                            {geo !== 'ok' && geo !== 'locating' && (
+                                <button type="button" className="btn btn-ghost btn-sm" onClick={locate}>
+                                    <Icon name="refresh" size={14} /> Try again
+                                </button>
+                            )}
+                        </div>
+
+                        <button type="submit" className="btn btn-primary" disabled={submitting || blocked}>
+                            {submitting ? 'Saving…' : resubmitting ? 'Resubmit for review' : 'Submit log for review'}
                         </button>
                     </form>
-                </div>
+                </section>
 
-                {/* Right Workspace: Visual Calendar Heatmap Panel */}
-                <div className="calendar-wrapper">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                        <h3 style={{ fontWeight: 800, color: 'var(--primary-slate)' }}>📅 Calendar Activity Heatmaps</h3>
-                        <h4 style={{ color: 'var(--accent-blue)', fontWeight: 700 }}>{currentMonthLabel}</h4>
-                    </div>
-                    
-                    <div className="calendar-header-row">
-                        <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
-                    </div>
-                    
-                    <div className="calendar-grid">
-                        {renderCalendarDays()}
-                    </div>
-                </div>
+                <aside className="side-stack">
+                    <section className="card">
+                        <div className="card-head">
+                            <h2>Your calendar</h2>
+                        </div>
+                        <MonthCalendar marks={marks} onPick={(d) => d <= todayStr() && setDate(d)} />
+                    </section>
+
+                    <section className="card">
+                        <div className="card-head">
+                            <h2>Your supervisor</h2>
+                        </div>
+                        {supervisor ? (
+                            <div className="person">
+                                <Avatar name={supervisor.full_name} size={48} />
+                                <div className="person-text">
+                                    <strong>{[supervisor.title, supervisor.full_name].filter(Boolean).join(' ')}</strong>
+                                    <small>{supervisor.department || supervisor.email}</small>
+                                    {supervisor.office_loc && <small>Office: {supervisor.office_loc}</small>}
+                                </div>
+                                <Link to="/student/messages" className="btn btn-secondary btn-sm">
+                                    <Icon name="message" size={14} /> Message
+                                </Link>
+                            </div>
+                        ) : (
+                            <p className="muted">
+                                No supervisor assigned. <Link to="/student/settings">Choose one</Link>.
+                            </p>
+                        )}
+                    </section>
+
+                    {entries.length > 0 && (
+                        <section className="card">
+                            <div className="card-head">
+                                <h2>Recent logs</h2>
+                                <Link to="/student/history" className="link-sm">View all</Link>
+                            </div>
+                            <ul className="plain-list">
+                                {entries.slice(0, 4).map((e) => (
+                                    <li key={e.id} className="recent-item">
+                                        <span>{formatDate(e.date)}</span>
+                                        <StatusBadge status={e.status} />
+                                    </li>
+                                ))}
+                            </ul>
+                        </section>
+                    )}
+                </aside>
             </div>
-        </div>
+        </>
     );
 };

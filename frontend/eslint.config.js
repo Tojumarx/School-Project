@@ -18,5 +18,9 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Pages load their data from the API on mount; state is only set after the await.
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

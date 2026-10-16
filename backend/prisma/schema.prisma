@@ -28,6 +28,8 @@ model User {
   department    String?
   institution   String?
   gender        String?
+  dob           String?
+  avatar_url    String?
   
   // Supervisor linking
   supervisor_id Int?
@@ -40,23 +42,30 @@ model User {
 
   entries       Entry[]
   sentMessages  Message[] @relation("SentMessages")
+  receivedMessages Message[] @relation("ReceivedMessages")
   announcements Announcement[]
 }
 
 model Entry {
-  id             Int      @id @default(autoincrement())
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
-  date           String
-  day            String
-  activity       String
-  learnings      String
-  latitude       Float?
-  longitude      Float?
-  location_name  String?
-  student_email  String
-  user_id        Int?
-  user           User?    @relation(fields: [user_id], references: [id])
+  id                 Int       @id @default(autoincrement())
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+  date               String
+  description        String
+  image_url          String?
+  latitude           Float?
+  longitude          Float?
+  location_name      String?
+  status             String    @default("Pending") // "Pending" | "Approved" | "Rejected"
+  supervisor_comment String?
+  reviewed_at        DateTime?
+  student_email      String
+  student_name       String?
+  user_id            Int?
+  user               User?     @relation(fields: [user_id], references: [id])
+
+  @@index([student_email])
+  @@index([user_id])
 }
 
 model Announcement {
@@ -69,11 +78,17 @@ model Announcement {
 }
 
 model Message {
-  id          Int      @id @default(autoincrement())
-  created_at  DateTime @default(now())
-  sender_email String
-  receiver_id Int?
-  content     String
-  sender_id   Int?
-  sender      User?    @relation("SentMessages", fields: [sender_id], references: [id])
+  id             Int      @id @default(autoincrement())
+  created_at     DateTime @default(now())
+  content        String
+  is_broadcast   Boolean  @default(false)
+  read           Boolean  @default(false)
+  sender_id      Int
+  sender         User     @relation("SentMessages", fields: [sender_id], references: [id])
+  // null when is_broadcast = true (delivered to every student of the sender)
+  receiver_id    Int?
+  receiver       User?    @relation("ReceivedMessages", fields: [receiver_id], references: [id])
+
+  @@index([sender_id])
+  @@index([receiver_id])
 }
