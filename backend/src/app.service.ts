@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 import { SupabaseService } from './supabase.service';
+import { BlockchainService } from './blockchain.service';
 
 type DbUser = {
   id: number;
@@ -29,11 +30,19 @@ const SUPERVISOR_PUBLIC = {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+const PROOF_SUMMARY = {
+  proofs: {
+    select: { kind: true, status: true, bitcoin_height: true, confirmed_at: true },
+    orderBy: { id: 'desc' },
+  },
+} as const;
+
 @Injectable()
 export class AppService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly supabaseService: SupabaseService,
+    private readonly blockchain: BlockchainService,
   ) {}
 
   getHello(): string {
@@ -198,16 +207,34 @@ export class AppService {
 
   // ---------- ENTRIES ----------
   async getEntries(user: DbUser) {
-    if (user.role === 'supervisor') {
-      return this.prisma.entry.findMany({
-        where: { user: { supervisor_id: user.id } },
-        orderBy: [{ date: 'desc' }, { id: 'desc' }],
-      });
-    }
-    return this.prisma.entry.findMany({
-      where: { user_id: user.id },
+    const entries = await this.prisma.entry.findMany({
+      where: user.role === 'supervisor' ? { user: { supervisor_id: user.id } } : { user_id: user.id },
       orderBy: [{ date: 'desc' }, { id: 'desc' }],
+      include: PROOF_SUMMARY,
     });
+    return entries.map(({ proofs, ...entry }) => ({ ...entry, anchor: BlockchainService.summarize(proofs) }));
+  }
+
+  /** The entry, if this user is its student or that student's supervisor. */
+  private async accessibleEntry(user: DbUser, id: number) {
+    const entry = await this.prisma.entry.findUnique({ where: { id }, include: { user: true } });
+    if (!entry) throw new NotFoundException('Log entry not found');
+    const isOwner = user.role === 'student' && entry.user_id === user.id;
+    const isSupervisor = user.role === 'supervisor' && entry.user?.supervisor_id === user.id;
+    if (!isOwner && !isSupervisor) throw new ForbiddenException('You do not have access to this log');
+    return entry;
+  }
+
+  async getEntryProof(user: DbUser, id: number) {
+    const entry = await this.accessibleEntry(user, id);
+    return this.blockchain.verifyEntry(entry);
+  }
+
+  async getEntryOtsFile(user: DbUser, id: number, proofId: number) {
+    const entry = await this.accessibleEntry(user, id);
+    const file = await this.blockchain.otsFile(entry.id, proofId);
+    if (!file) throw new NotFoundException('This proof has not been stamped yet. Try again in a minute.');
+    return file;
   }
 
   async createEntry(user: DbUser, body: any) {
@@ -239,13 +266,15 @@ export class AppService {
         throw new ConflictException('You have already logged work for this date');
       }
       // A rejected log can be corrected and resubmitted for review
-      return this.prisma.entry.update({
+      const resubmitted = await this.prisma.entry.update({
         where: { id: existing.id },
         data: { ...payload, status: 'Pending', supervisor_comment: null, reviewed_at: null },
       });
+      await this.blockchain.recordSubmission(resubmitted);
+      return resubmitted;
     }
 
-    return this.prisma.entry.create({
+    const entry = await this.prisma.entry.create({
       data: {
         ...payload,
         date,
@@ -255,6 +284,8 @@ export class AppService {
         user_id: user.id,
       },
     });
+    await this.blockchain.recordSubmission(entry);
+    return entry;
   }
 
   async reviewEntry(user: DbUser, id: number, body: any) {
@@ -274,10 +305,12 @@ export class AppService {
       throw new ForbiddenException('This log belongs to a student you do not supervise');
     }
 
-    return this.prisma.entry.update({
+    const reviewed = await this.prisma.entry.update({
       where: { id },
       data: { status, supervisor_comment: comment || null, reviewed_at: new Date() },
     });
+    await this.blockchain.recordReview(reviewed, user.id);
+    return reviewed;
   }
 
   // ---------- MESSAGES ----------

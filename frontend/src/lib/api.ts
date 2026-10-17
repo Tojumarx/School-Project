@@ -47,5 +47,24 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
     return payload as T;
 }
 
+/** Downloads a file from the backend with the signed-in user's access token. */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    const res = await fetch(`${BACKEND_URL}/api${path}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        throw new ApiError(payload?.message || `Download failed (${res.status})`, res.status);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
 export const errorMessage = (err: unknown): string =>
     err instanceof Error ? err.message : 'Something went wrong';

@@ -444,3 +444,22 @@ tr:last-child td { border-bottom: 0; }
     .search input { width: 100%; }
     .card-head .search { width: 100%; }
 }
+
+/* ---------- Blockchain proof (OpenTimestamps) ---------- */
+.anchor-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; border: 1px solid transparent; }
+.anchor-confirmed { background: var(--brand-50); color: var(--brand-800); border-color: #c4e1d7; }
+.anchor-pending, .anchor-queued { background: var(--bg); color: var(--muted); border-color: var(--line); }
+.proof-panel { margin-top: 12px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); font-size: 0.84rem; display: grid; gap: 10px; }
+.proof-verdict { display: flex; align-items: flex-start; gap: 10px; }
+.proof-verdict strong { display: block; }
+.proof-verdict p { margin: 2px 0 0; color: var(--muted); }
+.proof-intact { color: var(--approved); }
+.proof-tampered { color: var(--rejected); }
+.proof-unanchored { color: var(--pending); }
+.proof-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.proof-item { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; display: grid; gap: 4px; }
+.proof-item-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.proof-hash { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.75rem; color: var(--muted); overflow-wrap: anywhere; }
+.proof-problem { color: var(--rejected); font-weight: 600; }
+.proof-help { margin: 0; color: var(--muted); }
+.badge-row { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }

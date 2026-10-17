@@ -1,4 +1,6 @@
-import { Controller, Get, Post, Put, Body, Param, Query, Req, UseGuards, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller, Get, Post, Put, Body, Param, Query, Req, UseGuards, ParseIntPipe, StreamableFile,
+} from '@nestjs/common';
 import { AppService } from './app.service';
 import { AuthGuard } from './auth.guard';
 
@@ -65,6 +67,27 @@ export class AppController {
   @Put('entries/:id/review')
   reviewEntry(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() body: any) {
     return this.appService.reviewEntry(req.user, id, body);
+  }
+
+  // --- BLOCKCHAIN PROOFS (OpenTimestamps) ---
+  @UseGuards(AuthGuard)
+  @Get('entries/:id/proof')
+  getEntryProof(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.appService.getEntryProof(req.user, id);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('entries/:id/proofs/:proofId/ots')
+  async downloadOts(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('proofId', ParseIntPipe) proofId: number,
+  ) {
+    const { proof, bytes } = await this.appService.getEntryOtsFile(req.user, id, proofId);
+    return new StreamableFile(bytes, {
+      type: 'application/octet-stream',
+      disposition: `attachment; filename="siwes-log-${id}-${proof.kind}-${proof.id}.ots"`,
+    });
   }
 
   // --- MESSAGES ---

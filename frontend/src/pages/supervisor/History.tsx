@@ -3,6 +3,7 @@ import { api, errorMessage } from '../../lib/api';
 import { formatDate } from '../../lib/dates';
 import type { Entry, EntryStatus } from '../../lib/types';
 import { Alert, Avatar, Empty, Icon, PageHeader, StatusBadge } from '../../components/ui';
+import { AnchorBadge, ProofCheck } from '../../components/Proof';
 
 export const SupervisorHistory: React.FC = () => {
     const [entries, setEntries] = useState<Entry[]>([]);
@@ -102,8 +103,14 @@ export const SupervisorHistory: React.FC = () => {
                                                 {e.supervisor_comment && (
                                                     <small className="muted"><Icon name="message" size={12} /> {e.supervisor_comment}</small>
                                                 )}
+                                                <ProofCheck entryId={e.id} />
                                             </td>
-                                            <td data-label="Status"><StatusBadge status={e.status} /></td>
+                                            <td data-label="Status">
+                                                <span className="badge-row">
+                                                    <StatusBadge status={e.status} />
+                                                    <AnchorBadge anchor={e.anchor} />
+                                                </span>
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>

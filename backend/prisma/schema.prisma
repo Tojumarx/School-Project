@@ -13,59 +13,79 @@ datasource db {
 }
 
 model User {
-  id            Int      @id @default(autoincrement())
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
-  email         String   @unique
-  password      String
-  full_name     String
-  role          String   // "student" | "supervisor" | "admin"
-  
+  id         Int      @id @default(autoincrement())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  email      String   @unique
+  password   String
+  full_name  String
+  role       String // "student" | "supervisor" | "admin"
+
   // Student specific details (null if supervisor)
-  student_id    String?
-  course        String?
-  level         String?
-  department    String?
-  institution   String?
-  gender        String?
-  dob           String?
-  avatar_url    String?
-  
+  student_id  String?
+  course      String?
+  level       String?
+  department  String?
+  institution String?
+  gender      String?
+  dob         String?
+  avatar_url  String?
+
   // Supervisor linking
   supervisor_id Int?
-  supervisor    User?    @relation("SupervisorToStudents", fields: [supervisor_id], references: [id])
-  students      User[]   @relation("SupervisorToStudents")
-  
-  // Supervisor specific details
-  title         String?
-  office_loc    String?
+  supervisor    User?  @relation("SupervisorToStudents", fields: [supervisor_id], references: [id])
+  students      User[] @relation("SupervisorToStudents")
 
-  entries       Entry[]
-  sentMessages  Message[] @relation("SentMessages")
-  receivedMessages Message[] @relation("ReceivedMessages")
-  announcements Announcement[]
+  // Supervisor specific details
+  title      String?
+  office_loc String?
+
+  entries          Entry[]
+  sentMessages     Message[]      @relation("SentMessages")
+  receivedMessages Message[]      @relation("ReceivedMessages")
+  announcements    Announcement[]
 }
 
 model Entry {
-  id                 Int       @id @default(autoincrement())
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @updatedAt
+  id                 Int          @id @default(autoincrement())
+  created_at         DateTime     @default(now())
+  updated_at         DateTime     @updatedAt
   date               String
   description        String
   image_url          String?
   latitude           Float?
   longitude          Float?
   location_name      String?
-  status             String    @default("Pending") // "Pending" | "Approved" | "Rejected"
+  status             String       @default("Pending") // "Pending" | "Approved" | "Rejected"
   supervisor_comment String?
   reviewed_at        DateTime?
   student_email      String
   student_name       String?
   user_id            Int?
-  user               User?     @relation(fields: [user_id], references: [id])
+  user               User?        @relation(fields: [user_id], references: [id])
+  proofs             EntryProof[]
 
   @@index([student_email])
   @@index([user_id])
+}
+
+// OpenTimestamps proof anchoring an entry snapshot to the Bitcoin blockchain
+model EntryProof {
+  id              Int       @id @default(autoincrement())
+  created_at      DateTime  @default(now())
+  entry_id        Int
+  entry           Entry     @relation(fields: [entry_id], references: [id], onDelete: Cascade)
+  kind            String // "submission" | "review"
+  hash            String // hex SHA-256 of the canonical snapshot
+  snapshot        Json // exactly what was hashed, so anyone can re-hash it
+  ots             Bytes? // serialized .ots proof, null until a calendar accepts it
+  status          String    @default("queued") // "queued" | "pending" | "confirmed"
+  bitcoin_height  Int?
+  confirmed_at    DateTime? // block time of the Bitcoin attestation
+  last_checked_at DateTime?
+
+  @@index([entry_id])
+  @@index([status])
 }
 
 model Announcement {
@@ -78,16 +98,16 @@ model Announcement {
 }
 
 model Message {
-  id             Int      @id @default(autoincrement())
-  created_at     DateTime @default(now())
-  content        String
-  is_broadcast   Boolean  @default(false)
-  read           Boolean  @default(false)
-  sender_id      Int
-  sender         User     @relation("SentMessages", fields: [sender_id], references: [id])
+  id           Int      @id @default(autoincrement())
+  created_at   DateTime @default(now())
+  content      String
+  is_broadcast Boolean  @default(false)
+  read         Boolean  @default(false)
+  sender_id    Int
+  sender       User     @relation("SentMessages", fields: [sender_id], references: [id])
   // null when is_broadcast = true (delivered to every student of the sender)
-  receiver_id    Int?
-  receiver       User?    @relation("ReceivedMessages", fields: [receiver_id], references: [id])
+  receiver_id  Int?
+  receiver     User?    @relation("ReceivedMessages", fields: [receiver_id], references: [id])
 
   @@index([sender_id])
   @@index([receiver_id])

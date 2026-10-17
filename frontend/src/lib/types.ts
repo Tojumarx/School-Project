@@ -44,6 +44,36 @@ export interface Entry {
     student_email: string;
     student_name: string | null;
     user_id: number | null;
+    anchor?: EntryAnchor | null;
+}
+
+export type AnchorStatus = 'queued' | 'pending' | 'confirmed';
+
+/** State of the entry's OpenTimestamps proof on the Bitcoin blockchain. */
+export interface EntryAnchor {
+    status: AnchorStatus;
+    bitcoin_height: number | null;
+    confirmed_at: string | null;
+}
+
+export interface ProofRecord {
+    id: number;
+    kind: 'submission' | 'review';
+    current: boolean;
+    hash: string;
+    status: AnchorStatus;
+    recorded_at: string;
+    bitcoin_height: number | null;
+    confirmed_at: string | null;
+    has_ots: boolean;
+    problems: string[];
+}
+
+export interface ProofReport {
+    entry_id: number;
+    integrity: 'intact' | 'tampered' | 'unanchored';
+    anchor: AnchorStatus | 'none';
+    proofs: ProofRecord[];
 }
 
 export interface Message {

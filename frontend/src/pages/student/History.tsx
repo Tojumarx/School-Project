@@ -4,6 +4,7 @@ import { api, errorMessage } from '../../lib/api';
 import { formatDate, formatTime } from '../../lib/dates';
 import type { Entry, EntryStatus } from '../../lib/types';
 import { Alert, Empty, Icon, PageHeader, StatusBadge } from '../../components/ui';
+import { AnchorBadge, ProofCheck } from '../../components/Proof';
 
 const FILTERS: Array<'All' | EntryStatus> = ['All', 'Pending', 'Approved', 'Rejected'];
 
@@ -85,7 +86,10 @@ export const StudentHistory: React.FC = () => {
                             <li key={e.id} className={`log log-${e.status.toLowerCase()}`}>
                                 <div className="log-top">
                                     <strong>{formatDate(e.date)}</strong>
-                                    <StatusBadge status={e.status} />
+                                    <span className="badge-row">
+                                        <AnchorBadge anchor={e.anchor} />
+                                        <StatusBadge status={e.status} />
+                                    </span>
                                 </div>
                                 <p className="log-body">{e.description}</p>
                                 {e.image_url && (
@@ -124,6 +128,7 @@ export const StudentHistory: React.FC = () => {
                                         </button>
                                     )}
                                 </div>
+                                <ProofCheck entryId={e.id} />
                             </li>
                         ))}
                     </ul>
