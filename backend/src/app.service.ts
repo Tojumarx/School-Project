@@ -1,235 +1,427 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 import { SupabaseService } from './supabase.service';
+import { BlockchainService } from './blockchain.service';
+
+type DbUser = {
+  id: number;
+  email: string;
+  role: string;
+  full_name: string;
+  supervisor_id: number | null;
+  [key: string]: any;
+};
+
+const SUPERVISOR_PUBLIC = {
+  id: true,
+  full_name: true,
+  title: true,
+  email: true,
+  department: true,
+  institution: true,
+  office_loc: true,
+} as const;
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const PROOF_SUMMARY = {
+  proofs: {
+    select: { kind: true, status: true, bitcoin_height: true, confirmed_at: true },
+    orderBy: { id: 'desc' },
+  },
+} as const;
 
 @Injectable()
 export class AppService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly supabaseService: SupabaseService,
+    private readonly blockchain: BlockchainService,
   ) {}
 
   getHello(): string {
     return 'SIWES Backend API Operational (Database Connected via Prisma)';
   }
 
-  // --- AUTH & USER SYNC ---
-  async syncUser(userData: any) {
-    if (!userData || !userData.email) {
-      throw new BadRequestException('Email is required to sync user profile');
+  // ---------- helpers ----------
+  private strip(user: any) {
+    if (!user) return user;
+    const { password, ...safe } = user;
+    return safe;
+  }
+
+  private requireRole(user: DbUser, role: 'student' | 'supervisor') {
+    if (user.role !== role) {
+      throw new ForbiddenException(`This action is only available to ${role}s`);
     }
+  }
 
-    const email = userData.email.trim();
-
-    try {
-      const existing = await this.prisma.user.findUnique({
-        where: { email },
-      });
-
-      // Resolve supervisor_id if supervisor_email or supervisor_id is provided
-      let supervisorId: number | null = userData.supervisor_id ? Number(userData.supervisor_id) : null;
-      if (!supervisorId && userData.supervisor_email) {
-        const sup = await this.prisma.user.findUnique({
-          where: { email: userData.supervisor_email.trim() },
-        });
-        if (sup) {
-          supervisorId = sup.id;
-        }
-      }
-
-      if (existing) {
-        return await this.prisma.user.update({
-          where: { id: existing.id },
-          data: {
-            full_name: userData.full_name || existing.full_name,
-            role: userData.role || existing.role,
-            student_id: userData.student_id ?? existing.student_id,
-            course: userData.course ?? existing.course,
-            level: userData.level ?? existing.level,
-            department: userData.department ?? existing.department,
-            institution: userData.institution ?? existing.institution,
-            gender: userData.gender ?? existing.gender,
-            title: userData.title ?? existing.title,
-            office_loc: userData.office_loc ?? existing.office_loc,
-            supervisor_id: supervisorId ?? existing.supervisor_id,
-          },
-        });
-      }
-
-      return await this.prisma.user.create({
-        data: {
-          email,
-          password: userData.password || 'managed_by_supabase',
-          full_name: userData.full_name || email.split('@')[0],
-          role: userData.role || 'student',
-          student_id: userData.student_id || null,
-          course: userData.course || null,
-          level: userData.level || null,
-          department: userData.department || null,
-          institution: userData.institution || null,
-          gender: userData.gender || null,
-          title: userData.title || null,
-          office_loc: userData.office_loc || null,
-          supervisor_id: supervisorId,
-        },
-      });
-    } catch (error: any) {
-      console.error('Failed to sync user to Database:', error);
-      throw new BadRequestException(`Database Save Error: ${error.message || 'Unable to persist user to database'}`);
+  private async ownStudent(supervisor: DbUser, studentId: number) {
+    const student = await this.prisma.user.findUnique({ where: { id: studentId } });
+    if (!student || student.role !== 'student' || student.supervisor_id !== supervisor.id) {
+      throw new ForbiddenException('That student is not assigned to you');
     }
+    return student;
+  }
+
+  private async resolveSupervisorId(raw: any): Promise<number | null> {
+    if (raw === undefined || raw === null || raw === '') return null;
+    const id = Number(raw);
+    if (!Number.isInteger(id)) throw new BadRequestException('Invalid supervisor');
+    const sup = await this.prisma.user.findUnique({ where: { id } });
+    if (!sup || sup.role !== 'supervisor') throw new BadRequestException('Selected supervisor does not exist');
+    return sup.id;
+  }
+
+  // ---------- AUTH / PROFILE ----------
+  async me(user: DbUser) {
+    const full = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      include: { supervisor: { select: SUPERVISOR_PUBLIC } },
+    });
+    return this.strip(full);
   }
 
   async registerUser(body: any) {
-    if (!body || !body.email) {
-      throw new BadRequestException('Email is required for account registration');
-    }
+    const email = String(body?.email || '').trim().toLowerCase();
+    const password = String(body?.password || '');
+    const fullName = String(body?.full_name || '').trim();
+    const role = body?.role === 'supervisor' ? 'supervisor' : 'student';
 
-    // 1. Save directly into PostgreSQL database via Prisma
-    const syncedUser = await this.syncUser(body);
+    if (!email || !fullName) throw new BadRequestException('Name and email are required');
+    if (password.length < 6) throw new BadRequestException('Password must be at least 6 characters');
 
-    // 2. Register on Supabase Auth (optional background sync)
-    try {
-      const client = this.supabaseService.getClient();
-      if (client && body.password) {
-        await client.auth.signUp({
-          email: body.email.trim(),
-          password: body.password,
-          options: {
-            data: body,
-          },
-        });
-      }
-    } catch (err: any) {
-      console.warn('Supabase Auth optional warning:', err.message);
-    }
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) throw new ConflictException('An account with this email already exists');
 
-    return {
-      message: 'Account created and saved to database successfully',
-      user: syncedUser,
-    };
-  }
+    const supervisorId = role === 'student' ? await this.resolveSupervisorId(body.supervisor_id) : null;
 
-  async loginUser(body: any) {
-    const { email, password } = body;
     const client = this.supabaseService.getClient();
-
-    const { data, error } = await client.auth.signInWithPassword({
+    const { data: created, error } = await client.auth.admin.createUser({
       email,
       password,
+      email_confirm: true,
+      user_metadata: { full_name: fullName, role },
     });
-
-    if (error) {
-      throw new BadRequestException(error.message);
+    if (error || !created.user) {
+      throw new BadRequestException(error?.message || 'Could not create the sign-in account');
     }
 
-    let user = await this.prisma.user.findUnique({
-      where: { email },
+    try {
+      const user = await this.prisma.user.create({
+        data: {
+          email,
+          password: 'managed_by_supabase',
+          full_name: fullName,
+          role,
+          department: body.department || null,
+          institution: body.institution || null,
+          student_id: role === 'student' ? body.student_id || null : null,
+          course: role === 'student' ? body.course || null : null,
+          level: role === 'student' ? body.level || null : null,
+          gender: role === 'student' ? body.gender || null : null,
+          supervisor_id: supervisorId,
+          title: role === 'supervisor' ? body.title || null : null,
+          office_loc: role === 'supervisor' ? body.office_loc || null : null,
+        },
+      });
+      return { message: 'Account created', user: this.strip(user) };
+    } catch (err: any) {
+      // Do not leave an orphaned sign-in account behind
+      await client.auth.admin.deleteUser(created.user.id).catch(() => undefined);
+      throw new BadRequestException(`Could not save profile: ${err.message}`);
+    }
+  }
+
+  async updateProfile(user: DbUser, body: any) {
+    const data: Record<string, any> = {};
+    const textFields = [
+      'full_name', 'gender', 'dob', 'avatar_url', 'department', 'institution',
+      'student_id', 'course', 'level', 'title', 'office_loc',
+    ];
+    for (const key of textFields) {
+      if (body[key] !== undefined) data[key] = body[key] === '' ? null : String(body[key]).trim();
+    }
+    if (data.full_name === null) throw new BadRequestException('Name cannot be empty');
+
+    if (user.role === 'student' && body.supervisor_id !== undefined) {
+      data.supervisor_id = await this.resolveSupervisorId(body.supervisor_id);
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data,
+      include: { supervisor: { select: SUPERVISOR_PUBLIC } },
+    });
+    return this.strip(updated);
+  }
+
+  async getSupervisors() {
+    return this.prisma.user.findMany({
+      where: { role: 'supervisor' },
+      select: SUPERVISOR_PUBLIC,
+      orderBy: { full_name: 'asc' },
+    });
+  }
+
+  // ---------- STUDENTS (supervisor view) ----------
+  async getStudents(user: DbUser) {
+    this.requireRole(user, 'supervisor');
+    const students = await this.prisma.user.findMany({
+      where: { role: 'student', supervisor_id: user.id },
+      orderBy: { full_name: 'asc' },
+      include: { entries: { select: { status: true, date: true } } },
+    });
+    return students.map((s) => {
+      const { entries, ...rest } = s;
+      return {
+        ...this.strip(rest),
+        stats: {
+          total: entries.length,
+          pending: entries.filter((e) => e.status === 'Pending').length,
+          approved: entries.filter((e) => e.status === 'Approved').length,
+          rejected: entries.filter((e) => e.status === 'Rejected').length,
+          lastLogDate: entries.map((e) => e.date).sort().pop() || null,
+        },
+      };
+    });
+  }
+
+  async createStudent(user: DbUser, body: any) {
+    this.requireRole(user, 'supervisor');
+    const result = await this.registerUser({
+      ...body,
+      role: 'student',
+      supervisor_id: user.id,
+      department: body.department || user.department,
+      institution: body.institution || user.institution,
+    });
+    return result;
+  }
+
+  // ---------- ENTRIES ----------
+  async getEntries(user: DbUser) {
+    const entries = await this.prisma.entry.findMany({
+      where: user.role === 'supervisor' ? { user: { supervisor_id: user.id } } : { user_id: user.id },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
+      include: PROOF_SUMMARY,
+    });
+    return entries.map(({ proofs, ...entry }) => ({ ...entry, anchor: BlockchainService.summarize(proofs) }));
+  }
+
+  /** The entry, if this user is its student or that student's supervisor. */
+  private async accessibleEntry(user: DbUser, id: number) {
+    const entry = await this.prisma.entry.findUnique({ where: { id }, include: { user: true } });
+    if (!entry) throw new NotFoundException('Log entry not found');
+    const isOwner = user.role === 'student' && entry.user_id === user.id;
+    const isSupervisor = user.role === 'supervisor' && entry.user?.supervisor_id === user.id;
+    if (!isOwner && !isSupervisor) throw new ForbiddenException('You do not have access to this log');
+    return entry;
+  }
+
+  async getEntryProof(user: DbUser, id: number) {
+    const entry = await this.accessibleEntry(user, id);
+    return this.blockchain.verifyEntry(entry);
+  }
+
+  async getEntryOtsFile(user: DbUser, id: number, proofId: number) {
+    const entry = await this.accessibleEntry(user, id);
+    const file = await this.blockchain.otsFile(entry.id, proofId);
+    if (!file) throw new NotFoundException('This proof has not been stamped yet. Try again in a minute.');
+    return file;
+  }
+
+  async createEntry(user: DbUser, body: any) {
+    this.requireRole(user, 'student');
+
+    const date = String(body?.date || '');
+    const description = String(body?.description || '').trim();
+    if (!DATE_RE.test(date)) throw new BadRequestException('Choose a valid work date');
+    if (description.length < 10) throw new BadRequestException('Describe the work done (at least 10 characters)');
+
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    if (date > todayStr) throw new BadRequestException('You cannot log work for a future date');
+
+    const lat = body.latitude !== undefined && body.latitude !== null ? Number(body.latitude) : null;
+    const lng = body.longitude !== undefined && body.longitude !== null ? Number(body.longitude) : null;
+
+    const payload = {
+      description,
+      image_url: body.image_url ? String(body.image_url).trim() : null,
+      latitude: Number.isFinite(lat) ? lat : null,
+      longitude: Number.isFinite(lng) ? lng : null,
+      location_name: body.location_name ? String(body.location_name).trim() : null,
+    };
+
+    const existing = await this.prisma.entry.findFirst({ where: { user_id: user.id, date } });
+    if (existing) {
+      if (existing.status !== 'Rejected') {
+        throw new ConflictException('You have already logged work for this date');
+      }
+      // A rejected log can be corrected and resubmitted for review
+      const resubmitted = await this.prisma.entry.update({
+        where: { id: existing.id },
+        data: { ...payload, status: 'Pending', supervisor_comment: null, reviewed_at: null },
+      });
+      await this.blockchain.recordSubmission(resubmitted);
+      return resubmitted;
+    }
+
+    const entry = await this.prisma.entry.create({
+      data: {
+        ...payload,
+        date,
+        status: 'Pending',
+        student_email: user.email,
+        student_name: user.full_name,
+        user_id: user.id,
+      },
+    });
+    await this.blockchain.recordSubmission(entry);
+    return entry;
+  }
+
+  async reviewEntry(user: DbUser, id: number, body: any) {
+    this.requireRole(user, 'supervisor');
+    const status = body?.status;
+    if (status !== 'Approved' && status !== 'Rejected') {
+      throw new BadRequestException('Status must be Approved or Rejected');
+    }
+    const comment = body?.comment ? String(body.comment).trim() : '';
+    if (status === 'Rejected' && !comment) {
+      throw new BadRequestException('Add a comment explaining why the log is being rejected');
+    }
+
+    const entry = await this.prisma.entry.findUnique({ where: { id }, include: { user: true } });
+    if (!entry) throw new NotFoundException('Log entry not found');
+    if (!entry.user || entry.user.supervisor_id !== user.id) {
+      throw new ForbiddenException('This log belongs to a student you do not supervise');
+    }
+
+    const reviewed = await this.prisma.entry.update({
+      where: { id },
+      data: { status, supervisor_comment: comment || null, reviewed_at: new Date() },
+    });
+    await this.blockchain.recordReview(reviewed, user.id);
+    return reviewed;
+  }
+
+  // ---------- MESSAGES ----------
+  async getConversations(user: DbUser) {
+    this.requireRole(user, 'supervisor');
+    const students = await this.prisma.user.findMany({
+      where: { role: 'student', supervisor_id: user.id },
+      select: { id: true, full_name: true, email: true, avatar_url: true },
+      orderBy: { full_name: 'asc' },
+    });
+    const direct = await this.prisma.message.findMany({
+      where: { is_broadcast: false, OR: [{ sender_id: user.id }, { receiver_id: user.id }] },
+      orderBy: { created_at: 'desc' },
     });
 
-    if (!user && data.user) {
-      user = await this.syncUser({
-        email: data.user.email,
-        full_name: data.user.user_metadata?.full_name || email.split('@')[0],
-        role: data.user.user_metadata?.role || 'student',
-        ...data.user.user_metadata,
+    return students
+      .map((s) => {
+        const thread = direct.filter((m) => m.sender_id === s.id || m.receiver_id === s.id);
+        return {
+          student: s,
+          last: thread[0] || null,
+          unread: thread.filter((m) => m.sender_id === s.id && !m.read).length,
+        };
+      })
+      .sort((a, b) => {
+        const at = a.last ? a.last.created_at.getTime() : 0;
+        const bt = b.last ? b.last.created_at.getTime() : 0;
+        return bt - at || a.student.full_name.localeCompare(b.student.full_name);
+      });
+  }
+
+  async getThread(user: DbUser, studentId?: number) {
+    if (user.role === 'supervisor') {
+      if (!studentId) throw new BadRequestException('Choose a student');
+      await this.ownStudent(user, studentId);
+      const messages = await this.prisma.message.findMany({
+        where: {
+          is_broadcast: false,
+          OR: [
+            { sender_id: user.id, receiver_id: studentId },
+            { sender_id: studentId, receiver_id: user.id },
+          ],
+        },
+        orderBy: { created_at: 'asc' },
+      });
+      await this.prisma.message.updateMany({
+        where: { sender_id: studentId, receiver_id: user.id, read: false },
+        data: { read: true },
+      });
+      return messages;
+    }
+
+    // Student: private thread with supervisor + broadcasts from that supervisor
+    if (!user.supervisor_id) return [];
+    const messages = await this.prisma.message.findMany({
+      where: {
+        OR: [
+          { is_broadcast: false, sender_id: user.id, receiver_id: user.supervisor_id },
+          { is_broadcast: false, sender_id: user.supervisor_id, receiver_id: user.id },
+          { is_broadcast: true, sender_id: user.supervisor_id },
+        ],
+      },
+      orderBy: { created_at: 'asc' },
+    });
+    await this.prisma.message.updateMany({
+      where: { sender_id: user.supervisor_id, receiver_id: user.id, read: false },
+      data: { read: true },
+    });
+    return messages;
+  }
+
+  async getBroadcasts(user: DbUser) {
+    this.requireRole(user, 'supervisor');
+    return this.prisma.message.findMany({
+      where: { sender_id: user.id, is_broadcast: true },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  async getUnreadCount(user: DbUser) {
+    const count = await this.prisma.message.count({
+      where: { receiver_id: user.id, read: false, is_broadcast: false },
+    });
+    return { count };
+  }
+
+  async sendMessage(user: DbUser, body: any) {
+    const content = String(body?.content || '').trim();
+    if (!content) throw new BadRequestException('Message cannot be empty');
+    if (content.length > 2000) throw new BadRequestException('Message is too long (2000 characters max)');
+
+    if (user.role === 'student') {
+      if (!user.supervisor_id) {
+        throw new BadRequestException('You have no supervisor assigned yet. Choose one in Settings.');
+      }
+      return this.prisma.message.create({
+        data: { content, sender_id: user.id, receiver_id: user.supervisor_id },
       });
     }
 
-    return {
-      session: data.session,
-      user,
-    };
-  }
+    if (body?.broadcast) {
+      return this.prisma.message.create({
+        data: { content, sender_id: user.id, is_broadcast: true },
+      });
+    }
 
-  // --- ENTRIES ---
-  async getEntries(studentEmail?: string) {
-    return this.prisma.entry.findMany({
-      where: studentEmail ? { student_email: studentEmail } : {},
-      orderBy: { created_at: 'desc' },
-    });
-  }
-
-  async createEntry(body: any) {
-    return this.prisma.entry.create({
-      data: {
-        date: body.date || new Date().toISOString(),
-        day: body.day || 'Today',
-        activity: body.activity || '',
-        learnings: body.learnings || '',
-        latitude: body.latitude ? parseFloat(body.latitude) : null,
-        longitude: body.longitude ? parseFloat(body.longitude) : null,
-        location_name: body.location_name || '',
-        student_email: body.student_email || '',
-      },
-    });
-  }
-
-  async updateEntry(id: string, body: any) {
-    return this.prisma.entry.update({
-      where: { id: parseInt(id, 10) },
-      data: body,
-    });
-  }
-
-  // --- ANNOUNCEMENTS ---
-  async getAnnouncements() {
-    return this.prisma.announcement.findMany({
-      orderBy: { created_at: 'desc' },
-    });
-  }
-
-  async createAnnouncement(body: any) {
-    return this.prisma.announcement.create({
-      data: {
-        title: body.title,
-        content: body.content,
-      },
-    });
-  }
-
-  // --- MESSAGES ---
-  async getMessages(email?: string) {
-    return this.prisma.message.findMany({
-      orderBy: { created_at: 'asc' },
-    });
-  }
-
-  async sendMessage(body: any) {
+    const studentId = Number(body?.student_id);
+    if (!Number.isInteger(studentId)) throw new BadRequestException('Choose a student to message');
+    await this.ownStudent(user, studentId);
     return this.prisma.message.create({
-      data: {
-        sender_email: body.sender_email || body.email || '',
-        content: body.content || body.message || '',
-      },
-    });
-  }
-
-  // --- USERS & SUPERVISORS ---
-  async getStudents() {
-    return this.prisma.user.findMany({
-      where: { role: 'student' },
-    });
-  }
-
-  async getSupervisors(searchQuery?: string) {
-    return this.prisma.user.findMany({
-      where: {
-        role: 'supervisor',
-        ...(searchQuery
-          ? {
-              full_name: {
-                contains: searchQuery,
-                mode: 'insensitive',
-              },
-            }
-          : {}),
-      },
-    });
-  }
-
-  async updateProfile(userId: string, body: any) {
-    return this.prisma.user.update({
-      where: { id: parseInt(userId, 10) },
-      data: body,
+      data: { content, sender_id: user.id, receiver_id: studentId },
     });
   }
 }

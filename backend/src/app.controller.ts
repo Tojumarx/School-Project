@@ -1,5 +1,8 @@
-import { Controller, Get, Post, Body, Param, Put, Query } from '@nestjs/common';
+import {
+  Controller, Get, Post, Put, Body, Param, Query, Req, UseGuards, ParseIntPipe, StreamableFile,
+} from '@nestjs/common';
 import { AppService } from './app.service';
+import { AuthGuard } from './auth.guard';
 
 @Controller('api')
 export class AppController {
@@ -10,73 +13,111 @@ export class AppController {
     return this.appService.getHello();
   }
 
-  // --- ENTRIES ---
-  @Get('entries')
-  async getEntries(@Query('studentEmail') studentEmail?: string) {
-    return this.appService.getEntries(studentEmail);
-  }
-
-  @Post('entries')
-  async createEntry(@Body() body: any) {
-    return this.appService.createEntry(body);
-  }
-
-  @Put('entries/:id')
-  async updateEntry(@Param('id') id: string, @Body() body: any) {
-    return this.appService.updateEntry(id, body);
-  }
-
-  // --- ANNOUNCEMENTS ---
-  @Get('announcements')
-  async getAnnouncements() {
-    return this.appService.getAnnouncements();
-  }
-
-  @Post('announcements')
-  async createAnnouncement(@Body() body: any) {
-    return this.appService.createAnnouncement(body);
-  }
-
-  // --- MESSAGES ---
-  @Get('messages')
-  async getMessages(@Query('email') email?: string) {
-    return this.appService.getMessages(email);
-  }
-
-  @Post('messages')
-  async sendMessage(@Body() body: any) {
-    return this.appService.sendMessage(body);
-  }
-
-  // --- USERS / STUDENTS / SUPERVISORS ---
-  @Get('students')
-  async getStudents() {
-    return this.appService.getStudents();
-  }
-
+  // --- PUBLIC (used by the sign-up form) ---
   @Get('supervisors')
-  async getSupervisors(@Query('query') query?: string) {
-    return this.appService.getSupervisors(query);
-  }
-
-  // --- AUTH & USER SYNC ---
-  @Post('auth/sync-user')
-  async syncUser(@Body() body: any) {
-    return this.appService.syncUser(body);
+  getSupervisors() {
+    return this.appService.getSupervisors();
   }
 
   @Post('auth/register')
-  async register(@Body() body: any) {
+  register(@Body() body: any) {
     return this.appService.registerUser(body);
   }
 
-  @Post('auth/login')
-  async login(@Body() body: any) {
-    return this.appService.loginUser(body);
+  // --- CURRENT USER ---
+  @UseGuards(AuthGuard)
+  @Get('auth/me')
+  me(@Req() req: any) {
+    return this.appService.me(req.user);
   }
 
-  @Put('profiles/:id')
-  async updateProfile(@Param('id') id: string, @Body() body: any) {
-    return this.appService.updateProfile(id, body);
+  @UseGuards(AuthGuard)
+  @Put('profile')
+  updateProfile(@Req() req: any, @Body() body: any) {
+    return this.appService.updateProfile(req.user, body);
+  }
+
+  // --- STUDENTS (supervisor) ---
+  @UseGuards(AuthGuard)
+  @Get('students')
+  getStudents(@Req() req: any) {
+    return this.appService.getStudents(req.user);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('students')
+  createStudent(@Req() req: any, @Body() body: any) {
+    return this.appService.createStudent(req.user, body);
+  }
+
+  // --- ENTRIES ---
+  @UseGuards(AuthGuard)
+  @Get('entries')
+  getEntries(@Req() req: any) {
+    return this.appService.getEntries(req.user);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('entries')
+  createEntry(@Req() req: any, @Body() body: any) {
+    return this.appService.createEntry(req.user, body);
+  }
+
+  @UseGuards(AuthGuard)
+  @Put('entries/:id/review')
+  reviewEntry(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() body: any) {
+    return this.appService.reviewEntry(req.user, id, body);
+  }
+
+  // --- BLOCKCHAIN PROOFS (OpenTimestamps) ---
+  @UseGuards(AuthGuard)
+  @Get('entries/:id/proof')
+  getEntryProof(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.appService.getEntryProof(req.user, id);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('entries/:id/proofs/:proofId/ots')
+  async downloadOts(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('proofId', ParseIntPipe) proofId: number,
+  ) {
+    const { proof, bytes } = await this.appService.getEntryOtsFile(req.user, id, proofId);
+    return new StreamableFile(bytes, {
+      type: 'application/octet-stream',
+      disposition: `attachment; filename="siwes-log-${id}-${proof.kind}-${proof.id}.ots"`,
+    });
+  }
+
+  // --- MESSAGES ---
+  @UseGuards(AuthGuard)
+  @Get('messages/conversations')
+  getConversations(@Req() req: any) {
+    return this.appService.getConversations(req.user);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('messages/thread')
+  getThread(@Req() req: any, @Query('studentId') studentId?: string) {
+    return this.appService.getThread(req.user, studentId ? Number(studentId) : undefined);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('messages/broadcasts')
+  getBroadcasts(@Req() req: any) {
+    return this.appService.getBroadcasts(req.user);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('messages/unread-count')
+  getUnreadCount(@Req() req: any) {
+    return this.appService.getUnreadCount(req.user);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('messages')
+  sendMessage(@Req() req: any, @Body() body: any) {
+    return this.appService.sendMessage(req.user, body);
   }
 }
