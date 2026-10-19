@@ -10,7 +10,7 @@
     "start": "node dist/src/main",
     "start:dev": "ts-node -r tsconfig-paths/register src/main.ts",
     "start:prod": "node dist/src/main",
-    "postinstall": "prisma skills sync || exit 0",
+    "postinstall": "prisma generate && (prisma skills sync || exit 0)",
     "db:migrate": "prisma migrate deploy",
     "db:status": "prisma migrate status"
   },
